@@ -30,7 +30,7 @@ export const analysesService = {
     const timestamp = Date.now();
     const fileName = `${userId}/${section}_${timestamp}.webm`;
 
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from('voice-notes')
       .upload(fileName, blob, {
         contentType: 'audio/webm',
