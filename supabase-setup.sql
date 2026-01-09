@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   full_name TEXT,
-  role TEXT DEFAULT 'SCRIPT_WRITER',
+  role TEXT DEFAULT 'SCRIPT_WRITER' CHECK (role IN ('SUPER_ADMIN', 'SCRIPT_WRITER')),
   avatar_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -59,16 +59,29 @@ ALTER TABLE viral_analyses ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if they exist
 DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS "Admins can view all profiles" ON profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can view own analyses" ON viral_analyses;
+DROP POLICY IF EXISTS "Admins can view all analyses" ON viral_analyses;
 DROP POLICY IF EXISTS "Users can create own analyses" ON viral_analyses;
 DROP POLICY IF EXISTS "Users can update own analyses" ON viral_analyses;
+DROP POLICY IF EXISTS "Admins can update all analyses" ON viral_analyses;
 DROP POLICY IF EXISTS "Users can delete own analyses" ON viral_analyses;
+DROP POLICY IF EXISTS "Admins can delete any analyses" ON viral_analyses;
 
 -- Profiles policies
 CREATE POLICY "Users can view own profile"
   ON profiles FOR SELECT
   USING (auth.uid() = id);
+
+CREATE POLICY "Admins can view all profiles"
+  ON profiles FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE id = auth.uid() AND role = 'SUPER_ADMIN'
+    )
+  );
 
 CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE
@@ -79,6 +92,15 @@ CREATE POLICY "Users can view own analyses"
   ON viral_analyses FOR SELECT
   USING (auth.uid() = user_id);
 
+CREATE POLICY "Admins can view all analyses"
+  ON viral_analyses FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE id = auth.uid() AND role = 'SUPER_ADMIN'
+    )
+  );
+
 CREATE POLICY "Users can create own analyses"
   ON viral_analyses FOR INSERT
   WITH CHECK (auth.uid() = user_id);
@@ -87,9 +109,27 @@ CREATE POLICY "Users can update own analyses"
   ON viral_analyses FOR UPDATE
   USING (auth.uid() = user_id);
 
+CREATE POLICY "Admins can update all analyses"
+  ON viral_analyses FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE id = auth.uid() AND role = 'SUPER_ADMIN'
+    )
+  );
+
 CREATE POLICY "Users can delete own analyses"
   ON viral_analyses FOR DELETE
   USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can delete any analyses"
+  ON viral_analyses FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE id = auth.uid() AND role = 'SUPER_ADMIN'
+    )
+  );
 
 -- ============================================
 -- STORAGE

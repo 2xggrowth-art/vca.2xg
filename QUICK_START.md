@@ -1,258 +1,175 @@
-# Quick Start Guide - Viral Content Analyzer
+# ⚡ Quick Start - Production Workflow
 
-## 🚀 Get Started in 30 Minutes
+## 🚀 Get Started in 3 Steps
 
-### Step 1: Create Supabase Project (5 min)
+### Step 1: Run SQL Migration (5 minutes)
 
-1. Go to https://supabase.com and sign up/login
-2. Click "New Project"
-3. Fill in:
-   - Name: `viral-content-analyzer`
-   - Database Password: (generate strong password)
-   - Region: Choose closest to your users
-4. Wait for project to be ready (~2 minutes)
-5. **Save these values:**
-   - Project URL: `https://xxxxx.supabase.co`
-   - API Key (anon public): Found in Settings → API
+1. Open https://supabase.com/dashboard
+2. Go to your project → SQL Editor → New Query
+3. Copy & paste [add-production-workflow.sql](./add-production-workflow.sql)
+4. Click **Run**
+5. ✅ Done! Tables and functions created
 
-### Step 2: Set Up Database (5 min)
+### Step 2: Create Test Users (2 minutes)
 
-1. In Supabase dashboard, go to **SQL Editor**
-2. Click **New Query**
-3. Copy the entire SQL from `DEPLOYMENT_PLAN.md` Phase 1.2
-4. Click **Run** button
-5. Verify tables created:
-   - Go to **Table Editor**
-   - You should see: `profiles`, `viral_analyses`
+Run this in Supabase SQL Editor:
 
-### Step 3: Configure Auth (2 min)
+```sql
+-- Update existing user emails with roles
+UPDATE profiles SET role = 'VIDEOGRAPHER', full_name = 'John Camera'
+WHERE email = 'your-videographer@email.com';
 
-1. Go to **Authentication** → **Providers**
-2. Enable **Email** provider
-3. **Disable** these features (we don't need them):
-   - Email confirmation (optional - enable for production)
-   - Magic links
-4. Go to **Authentication** → **URL Configuration**
-5. Add your site URL: `http://localhost:5173` (development)
+UPDATE profiles SET role = 'EDITOR', full_name = 'Jane Editor'
+WHERE email = 'your-editor@email.com';
 
-### Step 4: Frontend Setup (10 min)
-
-```bash
-# Navigate to project
-cd ~/Desktop/ViralContentAnalyzer/frontend
-
-# Install dependencies
-npm install
-
-# Install required packages
-npm install @supabase/supabase-js @tanstack/react-query react-router-dom react-hot-toast @heroicons/react
-
-# Install dev dependencies
-npm install -D tailwindcss postcss autoprefixer
-npx tailwindcss init -p
-
-# Create .env file
-cat > .env << 'EOF'
-VITE_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
-EOF
-
-# Edit .env and add your real values
-nano .env
+UPDATE profiles SET role = 'POSTING_MANAGER', full_name = 'Mike Posts'
+WHERE email = 'your-posting@email.com';
 ```
 
-### Step 5: Copy Components from Video Hub (5 min)
+Or create new users through Supabase Auth and then update their roles.
 
-```bash
-# Create directories
-mkdir -p src/components
-mkdir -p src/pages
-mkdir -p src/lib
-mkdir -p src/services
+### Step 3: Test Assignment (2 minutes)
 
-# Copy these files from Video Hub:
-# From: /Users/arsalan/Desktop/Slack/frontend/web/src/
+1. **Create Analysis** - Login as script writer, submit analysis
+2. **Review & Approve** - Login as admin, review and approve
+3. **Assign Team** - Click "View Details" → "Assign Team"
+4. **Watch Magic** - Auto-assign videographer or manually select team
 
-# Copy VoiceRecorder component
-cp ~/Desktop/Slack/frontend/web/src/components/VoiceRecorder.tsx src/components/
+---
 
-# Copy pages (we'll adapt these)
-cp ~/Desktop/Slack/frontend/web/src/pages/IdeasPage.tsx src/pages/AnalysesPage.tsx
-cp ~/Desktop/Slack/frontend/web/src/pages/LoginPage.tsx src/pages/
-# Note: You'll need to update these to use Supabase
+## 📋 What You Can Do Now
+
+### As Admin/Creator:
+- ✅ Review and score analyses (1-10 on 4 criteria)
+- ✅ Approve/reject with feedback
+- ✅ Assign videographer (manual or auto)
+- ✅ Assign editor and posting manager
+- ✅ View assigned team in analysis details
+- ✅ Track production stage
+
+### As Team Member:
+- ✅ View assigned analyses
+- ✅ See production requirements
+- ✅ Track your workload
+
+---
+
+## 🎯 Key Features
+
+### Auto-Assignment Algorithm
+- Calculates workload per videographer
+- Considers active projects in PRE_PRODUCTION, SHOOTING, SHOOT_REVIEW
+- Doubles weight for URGENT priority
+- Assigns to person with lowest workload
+
+### Production Stages
+1. **NOT_STARTED** - Approved, no team yet
+2. **PRE_PRODUCTION** - Team assigned, planning
+3. **SHOOTING** - Filming in progress
+4. **SHOOT_REVIEW** - Reviewing footage
+5. **EDITING** - Creating final edit
+6. **EDIT_REVIEW** - Reviewing edit
+7. **FINAL_REVIEW** - Final QA
+8. **READY_TO_POST** - Approved for posting
+9. **POSTED** - Published!
+
+### Team Roles
+- 🎥 **VIDEOGRAPHER** - Films content
+- 🎬 **EDITOR** - Edits videos
+- 📢 **POSTING_MANAGER** - Posts & tracks
+- 👑 **CREATOR** - Oversees production
+
+---
+
+## 🎨 UI Preview
+
+**When you view an approved analysis, you'll see:**
+
+```
+┌─────────────────────────────────────────┐
+│  Production Team                         │
+├─────────────────────────────────────────┤
+│  🎥 Videographer: John Camera           │
+│  🎬 Editor: Jane Editor                 │
+│  📢 Posting Manager: Mike Posts         │
+│  Production Stage: PRE_PRODUCTION       │
+└─────────────────────────────────────────┘
+
+[Review & Score]  [Assign Team]  [Delete]
 ```
 
-### Step 6: Create Supabase Client (3 min)
+---
 
-Create `src/lib/supabase.ts`:
+## 📁 File Structure
+
+```
+ViralContentAnalyzer/
+├── add-production-workflow.sql          # Database migration
+├── SETUP_CHECKLIST.md                   # Complete setup guide
+├── PRODUCTION_WORKFLOW_GUIDE.md         # Detailed documentation
+├── QUICK_START.md                       # This file!
+├── frontend/
+│   ├── src/
+│   │   ├── types/index.ts              # TypeScript types
+│   │   ├── services/
+│   │   │   └── assignmentService.ts    # Assignment API
+│   │   ├── components/
+│   │   │   └── AssignTeamModal.tsx     # Assignment modal
+│   │   └── pages/
+│   │       └── AdminDashboard.tsx      # Admin page (updated)
+```
+
+---
+
+## 🔧 API Methods You Can Use
 
 ```typescript
-import { createClient } from '@supabase/supabase-js'
+import { assignmentService } from '@/services/assignmentService';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL!
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY!
+// Assign team
+await assignmentService.assignTeam(analysisId, {
+  videographerId: 'user-uuid',
+  editorId: 'user-uuid',
+  postingManagerId: 'user-uuid',
+  autoAssignVideographer: true,
+});
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
-```
+// Get my assigned work
+const { data, total } = await assignmentService.getMyAssignedAnalyses();
 
-### Step 7: Test Locally (2 min)
+// Update production stage
+await assignmentService.updateProductionStage(analysisId, {
+  production_stage: 'SHOOTING',
+  production_notes: 'Started filming today',
+});
 
-```bash
-npm run dev
-```
-
-Visit http://localhost:5173
-
----
-
-## 🎯 What You Should See
-
-1. **Login Page** - Clean, no demo accounts
-2. **Register** - Can create new account
-3. **Analyses Page** - Can submit viral content analysis
-4. **Voice Recording** - Can record voice notes
-5. **List View** - See all your analyses
-
----
-
-## 🔧 Troubleshooting
-
-### Error: "Invalid API key"
-- Double check `.env` file has correct values
-- Restart dev server after changing `.env`
-
-### Error: "Network error"
-- Check Supabase project is running (green dot in dashboard)
-- Verify URL configuration in Supabase Auth settings
-
-### Voice recording not working
-- Allow microphone permission in browser
-- Use HTTPS in production (required for microphone)
-
----
-
-## 📦 Deploy to Production
-
-### Option 1: Vercel (Recommended)
-
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel
-
-# Follow prompts:
-# - Link to existing project? No
-# - Project name: viral-content-analyzer
-# - Framework preset: Vite
-# - Build command: npm run build
-# - Output directory: dist
-
-# Set environment variables in Vercel dashboard:
-# VITE_SUPABASE_URL = your_supabase_url
-# VITE_SUPABASE_ANON_KEY = your_anon_key
-
-# Redeploy
-vercel --prod
-```
-
-### Option 2: Netlify
-
-```bash
-# Install Netlify CLI
-npm i -g netlify-cli
-
-# Deploy
-netlify deploy --prod
-
-# Set build command: npm run build
-# Set publish directory: dist
+// Get users by role
+const videographers = await assignmentService.getUsersByRole('VIDEOGRAPHER');
 ```
 
 ---
 
-## ✅ Production Checklist
+## ✅ Checklist
 
-Before going live:
-
-- [ ] Enable email confirmation in Supabase Auth
-- [ ] Set up custom domain
-- [ ] Add domain to Supabase allowed URLs
-- [ ] Remove all console.logs
-- [ ] Test on mobile devices
-- [ ] Set up error monitoring (Sentry)
-- [ ] Configure analytics (PostHog, Google Analytics)
-- [ ] Add privacy policy page
-- [ ] Add terms of service page
-- [ ] Test voice recording on HTTPS
-- [ ] Set up backup strategy for database
+- [ ] SQL migration run in Supabase
+- [ ] At least 1 videographer user created
+- [ ] At least 1 analysis approved
+- [ ] Clicked "Assign Team" button
+- [ ] Saw team assignment modal
+- [ ] Successfully assigned team
+- [ ] Team appears in analysis details
 
 ---
 
-## 🔗 Useful Links
+## 🎉 You're Done!
 
-- Supabase Dashboard: https://app.supabase.com
-- Vercel Dashboard: https://vercel.com/dashboard
-- Supabase Docs: https://supabase.com/docs
-- React Query Docs: https://tanstack.com/query/latest
+Your production workflow is now live!
 
----
+**Next:** See [PRODUCTION_WORKFLOW_GUIDE.md](./PRODUCTION_WORKFLOW_GUIDE.md) for:
+- Complete workflow details
+- Database schema
+- RLS policies
+- User journeys
+- Future enhancements
 
-## 💡 Pro Tips
-
-1. **Use Supabase CLI** for database migrations:
-   ```bash
-   npm i -g supabase
-   supabase login
-   supabase db pull
-   ```
-
-2. **Enable RLS (Row Level Security)** - Already done in our SQL!
-   This ensures users can only see their own data.
-
-3. **Use Supabase Storage** for voice notes instead of base64:
-   - More efficient
-   - Better performance
-   - Automatic CDN
-
-4. **Set up webhooks** for real-time sync with Video Hub later.
-
-5. **Use Supabase Edge Functions** if you need server-side logic.
-
----
-
-## 🤝 Integration with Video Hub
-
-Later, when you want to integrate with Video Hub:
-
-1. **Option A: Shared Database**
-   - Point both apps to same Supabase project
-   - Share authentication
-   - Sync data automatically
-
-2. **Option B: API Integration**
-   - Export button in Viral Analyzer
-   - Calls Video Hub API to create idea
-   - Maps fields appropriately
-
-3. **Option C: Separate Tools**
-   - Keep them independent
-   - Use OAuth for SSO
-   - Manual data export/import
-
----
-
-## 📱 Next Features (Future)
-
-- [ ] AI-powered analysis suggestions
-- [ ] Viral pattern detection
-- [ ] Team collaboration
-- [ ] Analytics dashboard
-- [ ] Export to PDF/CSV
-- [ ] Email notifications
-- [ ] Mobile app (React Native)
-
----
-
-**Need Help?** Check `DEPLOYMENT_PLAN.md` for detailed instructions!
+**Questions?** Check [SETUP_CHECKLIST.md](./SETUP_CHECKLIST.md) for troubleshooting.

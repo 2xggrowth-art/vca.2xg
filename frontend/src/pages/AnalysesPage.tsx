@@ -2,9 +2,16 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { analysesService } from '@/services/analysesService';
-import { PlusIcon, PencilIcon, LinkIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { adminService } from '@/services/adminService';
+import { profileService } from '@/services/profileService';
+import { contentConfigService } from '@/services/contentConfigService';
+import { PlusIcon, PencilIcon, LinkIcon, EyeIcon, StarIcon } from '@heroicons/react/24/outline';
+import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import VoiceRecorder from '@/components/VoiceRecorder';
-import type { ViralAnalysis, AnalysisFormData } from '@/types';
+import MultiSelectTags from '@/components/MultiSelectTags';
+import ReviewScoreInput from '@/components/ReviewScoreInput';
+import type { ViralAnalysis, AnalysisFormData, ReviewAnalysisData } from '@/types';
+import { UserRole } from '@/types';
 
 const TARGET_EMOTIONS = [
   'Curiosity',
@@ -51,9 +58,11 @@ export default function AnalysesPage() {
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [viewingAnalysis, setViewingAnalysis] = useState<ViralAnalysis | null>(null);
   const [editingAnalysis, setEditingAnalysis] = useState<ViralAnalysis | null>(null);
   const [formData, setFormData] = useState<AnalysisFormData>({
+    // Existing fields
     referenceUrl: '',
     hook: '',
     hookVoiceNote: null,
@@ -66,11 +75,59 @@ export default function AnalysesPage() {
     howToReplicateVoiceNoteUrl: '',
     targetEmotion: '',
     expectedOutcome: '',
+    // New enhanced fields
+    industryId: '',
+    profileId: '',
+    hookTagIds: [],
+    totalPeopleInvolved: 1,
+    characterTagIds: [],
+    onScreenTextHook: '',
+    ourIdeaAudio: null,
+    ourIdeaAudioUrl: '',
+    shootLocation: '',
+    shootPossibility: 50,
   });
+  const [reviewData, setReviewData] = useState<ReviewAnalysisData>({
+    status: 'APPROVED',
+    feedback: '',
+    hookStrength: 5,
+    contentQuality: 5,
+    viralPotential: 5,
+    replicationClarity: 5,
+  });
+
+  // Check if current user is admin
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: profileService.getMyProfile,
+  });
+
+  const isAdmin = profile?.role === UserRole.SUPER_ADMIN;
 
   const { data: analyses, isLoading } = useQuery({
     queryKey: ['analyses'],
     queryFn: analysesService.getMyAnalyses,
+  });
+
+  // Fetch configuration data for form dropdowns
+  const { data: industries = [] } = useQuery({
+    queryKey: ['industries'],
+    queryFn: contentConfigService.getAllIndustries,
+  });
+
+  const { data: hookTags = [] } = useQuery({
+    queryKey: ['hook-tags'],
+    queryFn: contentConfigService.getAllHookTags,
+  });
+
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['profile-list'],
+    queryFn: contentConfigService.getAllProfiles,
+  });
+
+  const { data: characterTags = [] } = useQuery({
+    queryKey: ['character-tags'],
+    queryFn: contentConfigService.getAllCharacterTags,
   });
 
   const createMutation = useMutation({
@@ -98,9 +155,45 @@ export default function AnalysesPage() {
     },
   });
 
-  const openModal = (analysis?: ViralAnalysis) => {
+  // Review analysis mutation (admin only)
+  const reviewMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ReviewAnalysisData }) =>
+      adminService.reviewAnalysis(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analyses'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analyses'] });
+      toast.success('Analysis reviewed successfully');
+      setIsReviewModalOpen(false);
+      setIsViewModalOpen(false);
+      setReviewData({
+        status: 'APPROVED',
+        feedback: '',
+        hookStrength: 5,
+        contentQuality: 5,
+        viralPotential: 5,
+        replicationClarity: 5,
+      });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to review analysis');
+    },
+  });
+
+  const openModal = async (analysis?: ViralAnalysis) => {
     if (analysis) {
       setEditingAnalysis(analysis);
+
+      // Fetch existing tags for this analysis
+      let existingHookTagIds: string[] = [];
+      let existingCharacterTagIds: string[] = [];
+
+      if (analysis.id) {
+        const hookTagsData = await contentConfigService.getAnalysisHookTags(analysis.id);
+        const characterTagsData = await contentConfigService.getAnalysisCharacterTags(analysis.id);
+        existingHookTagIds = hookTagsData.map(t => t.id);
+        existingCharacterTagIds = characterTagsData.map(t => t.id);
+      }
+
       setFormData({
         referenceUrl: analysis.reference_url || '',
         hook: analysis.hook || '',
@@ -114,6 +207,17 @@ export default function AnalysesPage() {
         howToReplicateVoiceNoteUrl: analysis.how_to_replicate_voice_note_url || '',
         targetEmotion: analysis.target_emotion || '',
         expectedOutcome: analysis.expected_outcome || '',
+        // Enhanced fields
+        industryId: analysis.industry_id || '',
+        profileId: analysis.profile_id || '',
+        hookTagIds: existingHookTagIds,
+        totalPeopleInvolved: analysis.total_people_involved || 1,
+        characterTagIds: existingCharacterTagIds,
+        onScreenTextHook: analysis.on_screen_text_hook || '',
+        ourIdeaAudio: null,
+        ourIdeaAudioUrl: analysis.our_idea_audio_url || '',
+        shootLocation: analysis.shoot_location || '',
+        shootPossibility: (analysis.shoot_possibility as 25 | 50 | 75 | 100) || 50,
       });
     }
     setIsModalOpen(true);
@@ -135,6 +239,17 @@ export default function AnalysesPage() {
       howToReplicateVoiceNoteUrl: '',
       targetEmotion: '',
       expectedOutcome: '',
+      // Reset enhanced fields
+      industryId: '',
+      profileId: '',
+      hookTagIds: [],
+      totalPeopleInvolved: 1,
+      characterTagIds: [],
+      onScreenTextHook: '',
+      ourIdeaAudio: null,
+      ourIdeaAudioUrl: '',
+      shootLocation: '',
+      shootPossibility: 50,
     });
   };
 
@@ -146,6 +261,47 @@ export default function AnalysesPage() {
   const closeViewModal = () => {
     setIsViewModalOpen(false);
     setViewingAnalysis(null);
+  };
+
+  const openReviewModal = (analysis: ViralAnalysis) => {
+    setViewingAnalysis(analysis);
+    setIsReviewModalOpen(true);
+    // Pre-fill with existing scores if already reviewed
+    if (analysis.hook_strength) {
+      setReviewData({
+        status: analysis.status as 'APPROVED' | 'REJECTED',
+        feedback: analysis.feedback || '',
+        hookStrength: analysis.hook_strength,
+        contentQuality: analysis.content_quality || 5,
+        viralPotential: analysis.viral_potential || 5,
+        replicationClarity: analysis.replication_clarity || 5,
+      });
+    }
+  };
+
+  const closeReviewModal = () => {
+    setIsReviewModalOpen(false);
+    setViewingAnalysis(null);
+    setReviewData({
+      status: 'APPROVED',
+      feedback: '',
+      feedbackVoiceNote: null,
+      hookStrength: 5,
+      contentQuality: 5,
+      viralPotential: 5,
+      replicationClarity: 5,
+    });
+  };
+
+  const handleSubmitReview = () => {
+    if (!viewingAnalysis) return;
+
+    if (reviewData.status === 'REJECTED' && !reviewData.feedback?.trim()) {
+      toast.error('Feedback is required when rejecting an analysis');
+      return;
+    }
+
+    reviewMutation.mutate({ id: viewingAnalysis.id, data: reviewData });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -274,6 +430,46 @@ export default function AnalysesPage() {
                   Break down what made this content viral and how to replicate it
                 </p>
                 <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Industry Selection */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Industry *
+                    </label>
+                    <select
+                      required
+                      value={formData.industryId}
+                      onChange={(e) => setFormData({ ...formData, industryId: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                      <option value="">Select industry...</option>
+                      {industries.map((industry) => (
+                        <option key={industry.id} value={industry.id}>
+                          {industry.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Profile Assignment */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Profile / Admin *
+                    </label>
+                    <select
+                      required
+                      value={formData.profileId}
+                      onChange={(e) => setFormData({ ...formData, profileId: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                      <option value="">Select profile...</option>
+                      {profiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Reference Link *
@@ -290,6 +486,16 @@ export default function AnalysesPage() {
                       Paste the link to the viral content you want to analyze
                     </p>
                   </div>
+
+                  {/* Hook Tags Multi-Select */}
+                  <MultiSelectTags
+                    label="Hook Tags"
+                    options={hookTags.map(tag => ({ id: tag.id, name: tag.name }))}
+                    selectedIds={formData.hookTagIds}
+                    onChange={(ids) => setFormData({ ...formData, hookTagIds: ids })}
+                    placeholder="Select hook types..."
+                    required
+                  />
 
                   <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                     <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -408,6 +614,114 @@ export default function AnalysesPage() {
                       ))}
                     </select>
                   </div>
+
+                  {/* Divider - Script Writer Specific Fields */}
+                  <div className="border-t pt-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Production Details</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Additional information needed for video production
+                    </p>
+                  </div>
+
+                  {/* ON SCREEN TEXT HOOK - Column L from Excel */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      On-Screen Text Hook
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.onScreenTextHook}
+                      onChange={(e) => setFormData({ ...formData, onScreenTextHook: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="Text that will appear on screen during the hook (e.g., 'live robbery ( plus shooking emoji)')"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      The text overlay that will grab attention in the first few seconds
+                    </p>
+                  </div>
+
+                  {/* OUR IDEA - Column M from Excel (Audio recording) */}
+                  <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Our Idea (Voice Note)
+                    </label>
+                    <p className="text-xs text-gray-600 mb-3">
+                      Record your detailed idea and vision for this content
+                    </p>
+                    <VoiceRecorder
+                      label=""
+                      placeholder="Record your detailed idea for this content"
+                      onRecordingComplete={(blob, url) =>
+                        setFormData({ ...formData, ourIdeaAudio: blob, ourIdeaAudioUrl: url })
+                      }
+                      existingAudioUrl={formData.ourIdeaAudioUrl}
+                      onClear={() =>
+                        setFormData({ ...formData, ourIdeaAudio: null, ourIdeaAudioUrl: '' })
+                      }
+                    />
+                  </div>
+
+                  {/* LOCATION OF SHOOT - Column N from Excel */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Location of the Shoot
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.shootLocation}
+                      onChange={(e) => setFormData({ ...formData, shootLocation: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="e.g., in store, outside store, client location"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Where will this video be shot?
+                    </p>
+                  </div>
+
+                  {/* POSSIBILITY OF SHOOT - Column O from Excel */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Possibility of Shoot *
+                    </label>
+                    <select
+                      required
+                      value={formData.shootPossibility}
+                      onChange={(e) => setFormData({ ...formData, shootPossibility: parseInt(e.target.value) as 25 | 50 | 75 | 100 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                      <option value="100">100% - Definitely can shoot</option>
+                      <option value="75">75% - Very likely</option>
+                      <option value="50">50% - Moderate chance</option>
+                      <option value="25">25% - Challenging but possible</option>
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      How confident are you that this can be shot successfully?
+                    </p>
+                  </div>
+
+                  {/* Character Tags - Total People Involved */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Total People Involved
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={formData.totalPeopleInvolved}
+                      onChange={(e) => setFormData({ ...formData, totalPeopleInvolved: parseInt(e.target.value) || 1 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="Number of people needed for the shoot"
+                    />
+                  </div>
+
+                  {/* Character Tags Multi-Select */}
+                  <MultiSelectTags
+                    label="Character Tags"
+                    options={characterTags.map(tag => ({ id: tag.id, name: tag.name }))}
+                    selectedIds={formData.characterTagIds}
+                    onChange={(ids) => setFormData({ ...formData, characterTagIds: ids })}
+                    placeholder="Select characters involved..."
+                  />
 
                   <div className="flex justify-end space-x-3 pt-4 border-t">
                     <button
@@ -541,6 +855,73 @@ export default function AnalysesPage() {
                     </div>
                   </div>
 
+                  {/* Admin Review Scores (if reviewed) */}
+                  {viewingAnalysis.overall_score && (
+                    <div className="bg-gradient-to-r from-primary-50 to-purple-50 p-6 rounded-lg border-2 border-primary-200">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <StarIconSolid className="w-5 h-5 text-yellow-500 mr-2" />
+                        Admin Review Scores
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                        <div className="text-center bg-white rounded-lg p-3 shadow-sm">
+                          <div className="text-3xl font-bold text-primary-600">{viewingAnalysis.hook_strength}</div>
+                          <div className="text-xs text-gray-600 mt-1">Hook Strength</div>
+                        </div>
+                        <div className="text-center bg-white rounded-lg p-3 shadow-sm">
+                          <div className="text-3xl font-bold text-purple-600">{viewingAnalysis.content_quality}</div>
+                          <div className="text-xs text-gray-600 mt-1">Content Quality</div>
+                        </div>
+                        <div className="text-center bg-white rounded-lg p-3 shadow-sm">
+                          <div className="text-3xl font-bold text-pink-600">{viewingAnalysis.viral_potential}</div>
+                          <div className="text-xs text-gray-600 mt-1">Viral Potential</div>
+                        </div>
+                        <div className="text-center bg-white rounded-lg p-3 shadow-sm">
+                          <div className="text-3xl font-bold text-blue-600">{viewingAnalysis.replication_clarity}</div>
+                          <div className="text-xs text-gray-600 mt-1">Replication Clarity</div>
+                        </div>
+                        <div className="text-center bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-md border-2 border-green-300">
+                          <div className="text-4xl font-bold text-green-600">{viewingAnalysis.overall_score}</div>
+                          <div className="text-xs text-gray-700 mt-1 font-semibold">Overall Score</div>
+                        </div>
+                      </div>
+                      {(viewingAnalysis.feedback || viewingAnalysis.feedback_voice_note_url) && (
+                        <div className="mt-4 space-y-3">
+                          {viewingAnalysis.feedback && (
+                            <div className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+                              <div className="flex items-center mb-2">
+                                <svg className="w-4 h-4 text-primary-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                                </svg>
+                                <span className="text-sm font-semibold text-gray-700">Admin Feedback:</span>
+                              </div>
+                              <p className="text-sm text-gray-800 whitespace-pre-wrap">{viewingAnalysis.feedback}</p>
+                            </div>
+                          )}
+                          {viewingAnalysis.feedback_voice_note_url && (
+                            <div className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+                              <div className="flex items-center mb-2">
+                                <svg className="w-4 h-4 text-primary-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                                <span className="text-sm font-semibold text-gray-700">Voice Feedback:</span>
+                              </div>
+                              <audio controls className="w-full mt-2">
+                                <source src={viewingAnalysis.feedback_voice_note_url} type="audio/webm" />
+                                <source src={viewingAnalysis.feedback_voice_note_url} type="audio/mpeg" />
+                                Your browser does not support the audio element.
+                              </audio>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {viewingAnalysis.reviewed_at && (
+                        <div className="mt-3 text-xs text-gray-600 text-right">
+                          Reviewed on {new Date(viewingAnalysis.reviewed_at).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Timestamps */}
                   <div className="text-xs text-gray-500 border-t pt-4">
                     <p>Created: {new Date(viewingAnalysis.created_at).toLocaleString()}</p>
@@ -551,7 +932,19 @@ export default function AnalysesPage() {
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-6 border-t mt-6">
-                  {viewingAnalysis.status === 'PENDING' && (
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        closeViewModal();
+                        openReviewModal(viewingAnalysis);
+                      }}
+                      className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium flex items-center"
+                    >
+                      <StarIcon className="w-5 h-5 mr-2" />
+                      {viewingAnalysis.overall_score ? 'Update Review' : 'Review & Score'}
+                    </button>
+                  )}
+                  {!isAdmin && viewingAnalysis.status === 'PENDING' && (
                     <button
                       onClick={() => {
                         closeViewModal();
@@ -568,6 +961,176 @@ export default function AnalysesPage() {
                   >
                     Close
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Modal with Scoring (Admin Only) */}
+      {isReviewModalOpen && viewingAnalysis && isAdmin && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={closeReviewModal}></div>
+            <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                      <StarIcon className="w-7 h-7 text-yellow-500 mr-2" />
+                      Review & Score Analysis
+                    </h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Submitted by {viewingAnalysis.full_name || 'Unknown'} • {new Date(viewingAnalysis.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={closeReviewModal}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Decision */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-3">Decision</label>
+                    <div className="flex space-x-4">
+                      <button
+                        onClick={() => setReviewData({ ...reviewData, status: 'APPROVED' })}
+                        className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all ${
+                          reviewData.status === 'APPROVED'
+                            ? 'bg-green-600 text-white ring-2 ring-green-600 ring-offset-2'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        ✓ Approve
+                      </button>
+                      <button
+                        onClick={() => setReviewData({ ...reviewData, status: 'REJECTED' })}
+                        className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all ${
+                          reviewData.status === 'REJECTED'
+                            ? 'bg-red-600 text-white ring-2 ring-red-600 ring-offset-2'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        ✗ Reject
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Scoring Criteria */}
+                  <div className="bg-gray-50 p-6 rounded-lg space-y-6">
+                    <h3 className="text-lg font-semibold text-gray-900">Scoring Criteria (1-10)</h3>
+
+                    <ReviewScoreInput
+                      label="Hook Strength"
+                      description="How compelling and attention-grabbing is the hook?"
+                      value={reviewData.hookStrength}
+                      onChange={(value) => setReviewData({ ...reviewData, hookStrength: value })}
+                    />
+
+                    <ReviewScoreInput
+                      label="Content Quality"
+                      description="Overall quality of the analysis and explanation"
+                      value={reviewData.contentQuality}
+                      onChange={(value) => setReviewData({ ...reviewData, contentQuality: value })}
+                    />
+
+                    <ReviewScoreInput
+                      label="Viral Potential"
+                      description="How likely is this strategy to actually work?"
+                      value={reviewData.viralPotential}
+                      onChange={(value) => setReviewData({ ...reviewData, viralPotential: value })}
+                    />
+
+                    <ReviewScoreInput
+                      label="Replication Clarity"
+                      description="How clear and actionable are the replication steps?"
+                      value={reviewData.replicationClarity}
+                      onChange={(value) => setReviewData({ ...reviewData, replicationClarity: value })}
+                    />
+
+                    {/* Overall Score Preview */}
+                    <div className="pt-4 border-t border-gray-300">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">Overall Score (Average):</span>
+                        <span className="text-3xl font-bold text-primary-600">
+                          {((reviewData.hookStrength + reviewData.contentQuality + reviewData.viralPotential + reviewData.replicationClarity) / 4).toFixed(1)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Feedback */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">
+                        Written Feedback {reviewData.status === 'REJECTED' && <span className="text-red-600">*</span>}
+                      </label>
+                      <textarea
+                        value={reviewData.feedback}
+                        onChange={(e) => setReviewData({ ...reviewData, feedback: e.target.value })}
+                        rows={4}
+                        placeholder={reviewData.status === 'REJECTED' ? 'Feedback is required when rejecting...' : 'Optional feedback for the script writer...'}
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
+                          reviewData.status === 'REJECTED' && !reviewData.feedback?.trim()
+                            ? 'border-red-300 bg-red-50'
+                            : 'border-gray-300'
+                        }`}
+                      />
+                      {reviewData.status === 'REJECTED' && !reviewData.feedback?.trim() && (
+                        <p className="mt-1 text-sm text-red-600">Feedback is required when rejecting an analysis</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <VoiceRecorder
+                        label="Voice Feedback (Optional)"
+                        placeholder="Record audio feedback for the script writer"
+                        onRecordingComplete={(blob, url) => {
+                          setReviewData({ ...reviewData, feedbackVoiceNote: blob });
+                        }}
+                        onClear={() => {
+                          setReviewData({ ...reviewData, feedbackVoiceNote: null });
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-end space-x-3 pt-4 border-t">
+                    <button
+                      onClick={closeReviewModal}
+                      className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSubmitReview}
+                      disabled={reviewMutation.isPending}
+                      className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center"
+                    >
+                      {reviewMutation.isPending ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <StarIcon className="w-5 h-5 mr-2" />
+                          Submit Review
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
