@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import type { ViralAnalysis } from '@/types';
 
 export interface CreateVideographerProjectData {
   title: string; // This will be the hook
@@ -12,7 +13,7 @@ export const videographerProjectService = {
   /**
    * Create a new viral analysis entry for videographer-initiated projects
    */
-  async createProject(data: CreateVideographerProjectData) {
+  async createProject(data: CreateVideographerProjectData): Promise<ViralAnalysis> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
@@ -51,6 +52,33 @@ export const videographerProjectService = {
       // Don't throw - the project was created successfully
     }
 
-    return analysis;
+    // Fetch the full analysis with assignments populated
+    const { data: fullAnalysis, error: fetchError } = await supabase
+      .from('viral_analyses')
+      .select(`
+        *,
+        profiles:user_id (email, full_name, avatar_url),
+        assignments:project_assignments (
+          *,
+          user:profiles!project_assignments_user_id_fkey (id, email, full_name, avatar_url, role)
+        )
+      `)
+      .eq('id', analysis.id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // Transform assignments into specific roles
+    const result: ViralAnalysis = {
+      ...fullAnalysis,
+      email: fullAnalysis.profiles?.email,
+      full_name: fullAnalysis.profiles?.full_name,
+      avatar_url: fullAnalysis.profiles?.avatar_url,
+      videographer: fullAnalysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
+      editor: fullAnalysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
+      posting_manager: fullAnalysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+    };
+
+    return result;
   },
 };
