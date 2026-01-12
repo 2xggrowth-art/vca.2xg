@@ -119,6 +119,11 @@ export const analysesService = {
     // Map posting_profile to profileId if present
     const profileIdValue = formData.posting_profile || formData.profileId;
 
+    // Debug logging
+    console.log('🐛 [createAnalysis] posting_profile:', formData.posting_profile);
+    console.log('🐛 [createAnalysis] profileIdValue:', profileIdValue);
+    console.log('🐛 [createAnalysis] customFields:', customFields);
+
     const { data, error } = await supabase
       .from('viral_analyses')
       .insert({
