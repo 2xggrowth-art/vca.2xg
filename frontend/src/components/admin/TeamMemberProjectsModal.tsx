@@ -25,12 +25,7 @@ export default function TeamMemberProjectsModal({
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['team-member-projects', memberId, memberRole],
     queryFn: async () => {
-      let query = supabase.from('viral_analyses').select(`
-        *,
-        videographer:profiles!viral_analyses_videographer_id_fkey(id, full_name, email),
-        editor:profiles!viral_analyses_editor_id_fkey(id, full_name, email),
-        posting_manager:profiles!viral_analyses_posting_manager_id_fkey(id, full_name, email)
-      `);
+      let query = supabase.from('viral_analyses').select('*');
 
       // Filter based on role
       if (memberRole === 'SCRIPT_WRITER') {
@@ -47,6 +42,47 @@ export default function TeamMemberProjectsModal({
 
       const { data, error } = await query;
       if (error) throw error;
+
+      // Fetch related profile data separately if needed
+      if (data && data.length > 0) {
+        const userIds = new Set<string>();
+        data.forEach(project => {
+          if (project.videographer_id) userIds.add(project.videographer_id);
+          if (project.editor_id) userIds.add(project.editor_id);
+          if (project.posting_manager_id) userIds.add(project.posting_manager_id);
+          if (project.user_id) userIds.add(project.user_id);
+        });
+
+        if (userIds.size > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', Array.from(userIds));
+
+          const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+
+          // Attach profile data to projects
+          data.forEach(project => {
+            if (project.videographer_id) {
+              project.videographer = profileMap.get(project.videographer_id);
+            }
+            if (project.editor_id) {
+              project.editor = profileMap.get(project.editor_id);
+            }
+            if (project.posting_manager_id) {
+              project.posting_manager = profileMap.get(project.posting_manager_id);
+            }
+            if (project.user_id) {
+              const creator = profileMap.get(project.user_id);
+              if (creator) {
+                project.full_name = creator.full_name;
+                project.email = creator.email;
+              }
+            }
+          });
+        }
+      }
+
       return data as ViralAnalysis[];
     },
     enabled: isOpen && !!memberId,
