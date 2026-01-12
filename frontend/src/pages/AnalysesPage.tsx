@@ -388,6 +388,7 @@ export default function AnalysesPage() {
                   Break down what made this content viral and how to replicate it
                 </p>
                 <DynamicAnalysisForm
+                  key={isModalOpen ? 'form-open' : 'form-closed'}
                   formData={formData}
                   onChange={(updates) => setFormData({ ...formData, ...updates })}
                   onSubmit={handleSubmit}

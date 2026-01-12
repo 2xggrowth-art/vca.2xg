@@ -28,6 +28,7 @@ export default function DynamicAnalysisForm({
   const [resolvedFields, setResolvedFields] = useState<ResolvedField[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [reloadTrigger, setReloadTrigger] = useState(0);
 
   // Load and resolve form fields
   useEffect(() => {
@@ -35,6 +36,8 @@ export default function DynamicAnalysisForm({
       try {
         setIsLoadingFields(true);
         const enabledFields = formBuilderService.getEnabledFields();
+        console.log('📋 Loading form fields:', enabledFields.length, 'enabled fields');
+        enabledFields.forEach(f => console.log(`  - ${f.label} (${f.type}, key: ${f.fieldKey})`));
         const resolved = await resolveAllFieldOptions(enabledFields);
         setResolvedFields(resolved);
       } catch (error) {
@@ -45,6 +48,14 @@ export default function DynamicAnalysisForm({
     }
 
     loadFields();
+  }, [reloadTrigger]);
+
+  // Expose reload function via window for debugging
+  useEffect(() => {
+    (window as any).reloadFormFields = () => {
+      console.log('🔄 Manual reload triggered');
+      setReloadTrigger(prev => prev + 1);
+    };
   }, []);
 
   // Handle field value change
