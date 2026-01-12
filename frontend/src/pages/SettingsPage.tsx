@@ -885,8 +885,6 @@ function FormBuilderManagement() {
   const [fields, setFields] = useState<ScriptFormFieldConfig[]>(() =>
     formBuilderService.getAllFields()
   );
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Reload fields
   const reloadFields = () => {
@@ -1108,11 +1106,11 @@ function FormBuilderManagement() {
                   </button>
                   <button
                     onClick={() => {
-                      setSelectedFieldId(field.id);
-                      setIsEditModalOpen(true);
+                      // TODO: Implement field edit modal in Phase 2
+                      toast('Field editing coming in next phase!', { icon: 'ℹ️' });
                     }}
                     className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition"
-                    title="Edit field"
+                    title="Edit field (coming soon)"
                   >
                     <PencilIcon className="w-4 h-4" />
                   </button>
