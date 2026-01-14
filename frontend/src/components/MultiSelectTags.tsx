@@ -14,6 +14,8 @@ interface MultiSelectTagsProps {
   placeholder?: string;
   required?: boolean;
   error?: string;
+  allowCreate?: boolean; // Allow creating new tags by typing
+  onAddCustomTag?: (tagName: string) => void; // Called when a custom tag is added (simplified)
 }
 
 export default function MultiSelectTags({
@@ -24,10 +26,17 @@ export default function MultiSelectTags({
   placeholder = 'Select tags...',
   required = false,
   error,
+  allowCreate = false,
+  onAddCustomTag,
 }: MultiSelectTagsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [localTags, setLocalTags] = useState<Tag[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Merge DB tags with locally created tags
+  const allOptions = [...options, ...localTags];
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -40,6 +49,13 @@ export default function MultiSelectTags({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auto-focus search input when dropdown opens
+  useEffect(() => {
+    if (isOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isOpen]);
 
   const toggleTag = (tagId: string) => {
     if (selectedIds.includes(tagId)) {
@@ -54,10 +70,46 @@ export default function MultiSelectTags({
     onChange(selectedIds.filter(id => id !== tagId));
   };
 
-  const selectedTags = options.filter(tag => selectedIds.includes(tag.id));
-  const filteredOptions = options.filter(option =>
-    option.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const selectedTags = allOptions.filter(tag => selectedIds.includes(tag.id));
+  const filteredOptions = allOptions.filter(option =>
+    option.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+    !selectedIds.includes(option.id) // Hide already selected options
   );
+
+  // Check if search term matches an existing tag exactly
+  const exactMatch = allOptions.find(
+    option => option.name.toLowerCase() === searchTerm.toLowerCase()
+  );
+
+  // Handle Enter key to create new tag
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchTerm.trim() && allowCreate && !exactMatch) {
+      e.preventDefault();
+
+      // Create new tag locally
+      const newTag: Tag = {
+        id: `custom-${Date.now()}-${searchTerm.trim().toLowerCase().replace(/\s+/g, '-')}`,
+        name: searchTerm.trim(),
+      };
+
+      // Add to local tags list
+      setLocalTags(prev => [...prev, newTag]);
+
+      // Add to selected IDs
+      onChange([...selectedIds, newTag.id]);
+
+      // Notify parent if callback provided
+      if (onAddCustomTag) {
+        onAddCustomTag(searchTerm.trim());
+      }
+
+      setSearchTerm('');
+    } else if (e.key === 'Enter' && exactMatch) {
+      e.preventDefault();
+      toggleTag(exactMatch.id);
+      setSearchTerm('');
+    }
+  };
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -111,13 +163,20 @@ export default function MultiSelectTags({
           {/* Search Input */}
           <div className="p-2 border-b border-gray-200">
             <input
+              ref={searchInputRef}
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search..."
+              onKeyDown={handleKeyDown}
+              placeholder={allowCreate ? "Search or press Enter to create..." : "Search..."}
               className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               onClick={(e) => e.stopPropagation()}
             />
+            {allowCreate && searchTerm && !exactMatch && (
+              <p className="mt-1 text-xs text-gray-500">
+                Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">Enter</kbd> to create "{searchTerm}"
+              </p>
+            )}
           </div>
 
           {/* Options List */}
@@ -137,6 +196,13 @@ export default function MultiSelectTags({
                   <span className="ml-3 text-sm text-gray-900">{option.name}</span>
                 </label>
               ))
+            ) : searchTerm && allowCreate ? (
+              <div className="px-3 py-4 text-center">
+                <p className="text-sm text-gray-600 mb-2">No matching tags found</p>
+                <p className="text-xs text-gray-500">
+                  Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">Enter</kbd> to create "{searchTerm}"
+                </p>
+              </div>
             ) : (
               <div className="px-3 py-4 text-center text-sm text-gray-500">
                 No tags found

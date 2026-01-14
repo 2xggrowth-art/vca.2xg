@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { ViralAnalysis, ReviewAnalysisData } from '@/types';
+import type { ViralAnalysis, ReviewAnalysisData, HookTag, CharacterTag } from '@/types';
 
 export const adminService = {
   // Get all analyses with user info (admin only)
@@ -23,29 +23,58 @@ export const adminService = {
             avatar_url,
             role
           )
+        ),
+        industry:industries (
+          id,
+          name,
+          short_code
+        ),
+        profile:profile_list (
+          id,
+          name
         )
       `)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    // Flatten the nested profile data and parse assignments
-    return data.map((analysis: any) => {
-      const videographer = analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user;
-      const editor = analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user;
-      const posting_manager = analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user;
+    // Import content config service to fetch tags
+    const { contentConfigService } = await import('./contentConfigService');
 
-      return {
-        ...analysis,
-        email: analysis.profiles?.email,
-        full_name: analysis.profiles?.full_name,
-        avatar_url: analysis.profiles?.avatar_url,
-        videographer,
-        editor,
-        posting_manager,
-        profiles: undefined, // Remove the nested object
-      };
-    });
+    // Flatten the nested profile data and parse assignments + fetch tags
+    const analyses = await Promise.all(
+      data.map(async (analysis: any) => {
+        const videographer = analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user;
+        const editor = analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user;
+        const posting_manager = analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user;
+
+        // Fetch hook tags and character tags for this analysis
+        let hook_tags: HookTag[] = [];
+        let character_tags: CharacterTag[] = [];
+
+        try {
+          hook_tags = await contentConfigService.getAnalysisHookTags(analysis.id);
+          character_tags = await contentConfigService.getAnalysisCharacterTags(analysis.id);
+        } catch (err) {
+          console.error(`Failed to fetch tags for analysis ${analysis.id}:`, err);
+        }
+
+        return {
+          ...analysis,
+          email: analysis.profiles?.email,
+          full_name: analysis.profiles?.full_name,
+          avatar_url: analysis.profiles?.avatar_url,
+          videographer,
+          editor,
+          posting_manager,
+          hook_tags,
+          character_tags,
+          profiles: undefined, // Remove the nested object
+        };
+      })
+    );
+
+    return analyses;
   },
 
   // Review analysis with scoring (admin only)

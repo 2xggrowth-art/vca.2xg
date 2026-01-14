@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { UserGroupIcon, DocumentTextIcon, VideoCameraIcon, FilmIcon, MegaphoneIcon } from '@heroicons/react/24/outline';
+import { UserGroupIcon, DocumentTextIcon, VideoCameraIcon, FilmIcon, MegaphoneIcon, TableCellsIcon } from '@heroicons/react/24/outline';
 import TeamMemberProjectsModal from '@/components/admin/TeamMemberProjectsModal';
 
 interface TeamMember {
@@ -30,6 +31,7 @@ interface TeamStats {
 }
 
 export default function TeamMembersPage() {
+  const navigate = useNavigate();
   const [selectedMember, setSelectedMember] = useState<{ id: string; name: string; role: string } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -40,6 +42,11 @@ export default function TeamMembersPage() {
       role: member.role,
     });
     setIsModalOpen(true);
+  };
+
+  const handleViewAnalyses = (userId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/admin/analyses/by-user/${userId}`);
   };
 
   // Fetch all team members
@@ -302,13 +309,16 @@ export default function TeamMembersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Approval Rate
                       </th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {groupedMembers.SCRIPT_WRITER.map((member) => {
                       const stats = scriptWriterStats[member.id] || {};
                       return (
-                        <tr key={member.id} className="hover:bg-gray-50 cursor-pointer">
+                        <tr key={member.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <button
                               onClick={() => handleMemberClick(member)}
@@ -337,6 +347,15 @@ export default function TeamMembersPage() {
                             }`}>
                               {stats.approval_rate || 0}%
                             </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            <button
+                              onClick={(e) => handleViewAnalyses(member.id, e)}
+                              className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition"
+                            >
+                              <TableCellsIcon className="w-4 h-4 mr-1.5" />
+                              View Table
+                            </button>
                           </td>
                         </tr>
                       );

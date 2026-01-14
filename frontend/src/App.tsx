@@ -5,6 +5,7 @@ import LoginPage from '@/pages/LoginPage';
 import RegisterPage from '@/pages/RegisterPage';
 import AnalysesPage from '@/pages/AnalysesPage';
 import AdminDashboard from '@/pages/AdminDashboard';
+import AnalysisTablePage from '@/pages/admin/AnalysisTablePage';
 import VideographerDashboard from '@/pages/VideographerDashboard';
 import EditorDashboard from '@/pages/EditorDashboard';
 import PostingManagerDashboard from '@/pages/PostingManagerDashboard';
@@ -42,6 +43,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/analyses"
+            element={
+              <ProtectedRoute>
+                <AnalysisTablePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/analyses/by-user/:userId"
+            element={
+              <ProtectedRoute>
+                <AnalysisTablePage />
               </ProtectedRoute>
             }
           />

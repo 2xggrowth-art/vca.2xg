@@ -139,18 +139,62 @@ export interface ViralAnalysis {
   created_at: string;
   updated_at: string;
 
-  // Enhanced script fields
+  // Level 1: Basic Info (9 fields)
+  platform?: string;
+  content_type?: string;
+  shoot_type?: string;
+  characters_involved?: string;
+  creator_name?: string;
+  unusual_element?: string;
+  works_without_audio?: string;
+  content_rating?: number;
+  replication_strength?: number;
+
+  // Level 2: Emotional & Physical Reactions (9 fields)
+  body_reactions?: string[];
+  emotion_first_6_sec?: string;
+  challenged_belief?: string;
+  emotional_identity_impact?: string[];
+  if_he_can_why_cant_you?: string;
+  feel_like_commenting?: string;
+  read_comments?: string;
+  sharing_number?: number;
+  video_action?: string;
+
+  // Level 2: Production Details (6 fields)
   industry_id?: string;
-  content_id?: string; // Auto-generated (e.g., BCH-1001)
-  profile_id?: string; // Which profile/admin this is for
+  profile_id?: string;
   total_people_involved?: number;
-  additional_requirements?: string;
-  syed_sir_presence?: 'YES' | 'NO';
-  planning_date?: string;
-  on_screen_text_hook?: string;
-  our_idea_audio_url?: string; // Audio recording URL
-  shoot_location?: string;
   shoot_possibility?: 25 | 50 | 75 | 100;
+
+  // Level 3: Hook Study & Analysis (21 fields)
+  stop_feel?: string;
+  stop_feel_explanation?: string;
+  stop_feel_audio_url?: string;
+  immediate_understanding?: string;
+  immediate_understanding_audio_url?: string;
+  hook_carrier?: string;
+  hook_carrier_audio_url?: string;
+  hook_without_audio?: string;
+  hook_without_audio_recording_url?: string;
+  audio_alone_stops_scroll?: string;
+  audio_alone_stops_scroll_recording_url?: string;
+  dominant_emotion_first_6?: string;
+  dominant_emotion_first_6_audio_url?: string;
+  understanding_by_second_6?: string;
+  understanding_by_second_6_audio_url?: string;
+  content_rating_level_3?: number;
+
+  // Level 3: Production Planning (6 fields)
+  on_screen_text_hook?: string;
+  our_idea_audio_url?: string;
+  shoot_location?: string;
+  planning_date?: string;
+  additional_requirements?: string;
+
+  // System fields
+  content_id?: string; // Auto-generated (e.g., BCH-1001)
+  syed_sir_presence?: 'YES' | 'NO';
 
   // Populated related data
   industry?: Industry;
@@ -220,17 +264,68 @@ export interface AnalysisFormData {
   targetEmotion: string;
   expectedOutcome: string;
 
-  // New enhanced fields
+  // New Level 1 fields
+  platform: string;
+  contentType: string;
+  shootType: string;
+  charactersInvolved: string;
+  creatorName: string;
+  unusualElement: string;
+  worksWithoutAudio: string;
+  contentRating: number;
+  replicationStrength: number;
+
+  // Level 2 fields - Emotional & Physical Reactions
+  bodyReactions: string[]; // Multi-select: Breath held, Leaned closer, etc.
+  emotionFirst6Sec: string; // Shock, Curiosity, Fear, etc.
+  challengedBelief: string; // Yes/No
+  emotionalIdentityImpact: string[]; // Multi-select: Inspired, Inferior, etc.
+  ifHeCanWhyCantYou: string; // Yes/No
+  feelLikeCommenting: string; // Yes/No
+  readComments: string; // Yes/No
+  sharingNumber: number; // Numeric count
+  videoAction: string; // None, Follow, Learn more, Buy, Try it
+
+  // Level 2 fields - Production Details
   industryId: string;
   profileId: string;
   hookTagIds: string[]; // Multi-select
   totalPeopleInvolved: number;
   characterTagIds: string[]; // Multi-select
+  shootPossibility: 25 | 50 | 75 | 100;
+
+  // Level 3 fields - Hook Study & Analysis
+  stopFeel: string; // Reflexive/Conscious/Weak pause
+  stopFeelExplanation: string;
+  stopFeelAudio: Blob | null;
+  stopFeelAudioUrl: string;
+  immediateUnderstanding: string;
+  immediateUnderstandingAudio: Blob | null;
+  immediateUnderstandingAudioUrl: string;
+  hookCarrier: string;
+  hookCarrierAudio: Blob | null;
+  hookCarrierAudioUrl: string;
+  hookWithoutAudio: string;
+  hookWithoutAudioRecording: Blob | null;
+  hookWithoutAudioRecordingUrl: string;
+  audioAloneStopsScroll: string;
+  audioAloneStopsScrollRecording: Blob | null;
+  audioAloneStopsScrollRecordingUrl: string;
+  dominantEmotionFirst6: string;
+  dominantEmotionFirst6Audio: Blob | null;
+  dominantEmotionFirst6AudioUrl: string;
+  understandingBySecond6: string;
+  understandingBySecond6Audio: Blob | null;
+  understandingBySecond6AudioUrl: string;
+  contentRatingLevel3: number;
+
+  // Level 3 fields - Production Planning
   onScreenTextHook: string;
   ourIdeaAudio: Blob | null;
   ourIdeaAudioUrl: string;
   shootLocation: string;
-  shootPossibility: 25 | 50 | 75 | 100;
+  planningDate: string;
+  additionalRequirements: string;
 
   // Custom fields from Form Builder (dynamic)
   [key: string]: any; // Allow any custom field

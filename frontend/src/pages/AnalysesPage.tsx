@@ -9,9 +9,89 @@ import { PlusIcon, PencilIcon, LinkIcon, EyeIcon, StarIcon } from '@heroicons/re
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import ReviewScoreInput from '@/components/ReviewScoreInput';
-import DynamicAnalysisForm from '@/components/DynamicAnalysisForm';
+import { MultiStepAnalysisWizard } from '@/components/wizard';
 import type { ViralAnalysis, AnalysisFormData, ReviewAnalysisData } from '@/types';
 import { UserRole } from '@/types';
+
+// Helper function to create default form data
+const createDefaultFormData = (): AnalysisFormData => ({
+  // Existing fields
+  referenceUrl: '',
+  hook: '',
+  hookVoiceNote: null,
+  hookVoiceNoteUrl: '',
+  whyViral: '',
+  whyViralVoiceNote: null,
+  whyViralVoiceNoteUrl: '',
+  howToReplicate: '',
+  howToReplicateVoiceNote: null,
+  howToReplicateVoiceNoteUrl: '',
+  targetEmotion: '',
+  expectedOutcome: '',
+
+  // Level 1 new fields
+  platform: '',
+  contentType: '',
+  shootType: '',
+  charactersInvolved: '',
+  creatorName: '',
+  unusualElement: '',
+  worksWithoutAudio: '',
+  contentRating: 5,
+  replicationStrength: 5,
+
+  // Level 2 - Emotional & Physical Reactions
+  bodyReactions: [],
+  emotionFirst6Sec: '',
+  challengedBelief: '',
+  emotionalIdentityImpact: [],
+  ifHeCanWhyCantYou: '',
+  feelLikeCommenting: '',
+  readComments: '',
+  sharingNumber: 0,
+  videoAction: '',
+
+  // Level 2 - Production Details
+  industryId: '',
+  profileId: '',
+  hookTagIds: [],
+  totalPeopleInvolved: 1,
+  characterTagIds: [],
+  shootPossibility: 50,
+
+  // Level 3 - Hook Study
+  stopFeel: '',
+  stopFeelExplanation: '',
+  stopFeelAudio: null,
+  stopFeelAudioUrl: '',
+  immediateUnderstanding: '',
+  immediateUnderstandingAudio: null,
+  immediateUnderstandingAudioUrl: '',
+  hookCarrier: '',
+  hookCarrierAudio: null,
+  hookCarrierAudioUrl: '',
+  hookWithoutAudio: '',
+  hookWithoutAudioRecording: null,
+  hookWithoutAudioRecordingUrl: '',
+  audioAloneStopsScroll: '',
+  audioAloneStopsScrollRecording: null,
+  audioAloneStopsScrollRecordingUrl: '',
+  dominantEmotionFirst6: '',
+  dominantEmotionFirst6Audio: null,
+  dominantEmotionFirst6AudioUrl: '',
+  understandingBySecond6: '',
+  understandingBySecond6Audio: null,
+  understandingBySecond6AudioUrl: '',
+  contentRatingLevel3: 5,
+
+  // Level 3 - Production Planning
+  onScreenTextHook: '',
+  ourIdeaAudio: null,
+  ourIdeaAudioUrl: '',
+  shootLocation: '',
+  planningDate: '',
+  additionalRequirements: '',
+});
 
 export default function AnalysesPage() {
   const queryClient = useQueryClient();
@@ -20,32 +100,7 @@ export default function AnalysesPage() {
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [viewingAnalysis, setViewingAnalysis] = useState<ViralAnalysis | null>(null);
   const [editingAnalysis, setEditingAnalysis] = useState<ViralAnalysis | null>(null);
-  const [formData, setFormData] = useState<AnalysisFormData>({
-    // Existing fields
-    referenceUrl: '',
-    hook: '',
-    hookVoiceNote: null,
-    hookVoiceNoteUrl: '',
-    whyViral: '',
-    whyViralVoiceNote: null,
-    whyViralVoiceNoteUrl: '',
-    howToReplicate: '',
-    howToReplicateVoiceNote: null,
-    howToReplicateVoiceNoteUrl: '',
-    targetEmotion: '',
-    expectedOutcome: '',
-    // New enhanced fields
-    industryId: '',
-    profileId: '',
-    hookTagIds: [],
-    totalPeopleInvolved: 1,
-    characterTagIds: [],
-    onScreenTextHook: '',
-    ourIdeaAudio: null,
-    ourIdeaAudioUrl: '',
-    shootLocation: '',
-    shootPossibility: 50,
-  });
+  const [formData, setFormData] = useState<AnalysisFormData>(createDefaultFormData());
   const [reviewData, setReviewData] = useState<ReviewAnalysisData>({
     status: 'APPROVED',
     feedback: '',
@@ -133,29 +188,39 @@ export default function AnalysesPage() {
       }
 
       setFormData({
+        ...createDefaultFormData(),
         referenceUrl: analysis.reference_url || '',
         hook: analysis.hook || '',
-        hookVoiceNote: null,
         hookVoiceNoteUrl: analysis.hook_voice_note_url || '',
         whyViral: analysis.why_viral || '',
-        whyViralVoiceNote: null,
         whyViralVoiceNoteUrl: analysis.why_viral_voice_note_url || '',
         howToReplicate: analysis.how_to_replicate || '',
-        howToReplicateVoiceNote: null,
         howToReplicateVoiceNoteUrl: analysis.how_to_replicate_voice_note_url || '',
         targetEmotion: analysis.target_emotion || '',
         expectedOutcome: analysis.expected_outcome || '',
-        // Enhanced fields
+        // All new Level 1, 2, 3 fields from analysis
+        platform: analysis.platform || '',
+        contentType: analysis.content_type || '',
+        shootType: analysis.shoot_type || '',
+        charactersInvolved: analysis.characters_involved || '',
+        creatorName: analysis.creator_name || '',
+        unusualElement: analysis.unusual_element || '',
+        worksWithoutAudio: analysis.works_without_audio || '',
+        contentRating: analysis.content_rating || 5,
+        replicationStrength: analysis.replication_strength || 5,
+        // Level 2 production fields
         industryId: analysis.industry_id || '',
         profileId: analysis.profile_id || '',
         hookTagIds: existingHookTagIds,
         totalPeopleInvolved: analysis.total_people_involved || 1,
         characterTagIds: existingCharacterTagIds,
+        shootPossibility: (analysis.shoot_possibility as 25 | 50 | 75 | 100) || 50,
+        // Level 3 production planning
         onScreenTextHook: analysis.on_screen_text_hook || '',
-        ourIdeaAudio: null,
         ourIdeaAudioUrl: analysis.our_idea_audio_url || '',
         shootLocation: analysis.shoot_location || '',
-        shootPossibility: (analysis.shoot_possibility as 25 | 50 | 75 | 100) || 50,
+        planningDate: analysis.planning_date || '',
+        additionalRequirements: analysis.additional_requirements || '',
       });
     }
     setIsModalOpen(true);
@@ -164,31 +229,7 @@ export default function AnalysesPage() {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingAnalysis(null);
-    setFormData({
-      referenceUrl: '',
-      hook: '',
-      hookVoiceNote: null,
-      hookVoiceNoteUrl: '',
-      whyViral: '',
-      whyViralVoiceNote: null,
-      whyViralVoiceNoteUrl: '',
-      howToReplicate: '',
-      howToReplicateVoiceNote: null,
-      howToReplicateVoiceNoteUrl: '',
-      targetEmotion: '',
-      expectedOutcome: '',
-      // Reset enhanced fields
-      industryId: '',
-      profileId: '',
-      hookTagIds: [],
-      totalPeopleInvolved: 1,
-      characterTagIds: [],
-      onScreenTextHook: '',
-      ourIdeaAudio: null,
-      ourIdeaAudioUrl: '',
-      shootLocation: '',
-      shootPossibility: 50,
-    });
+    setFormData(createDefaultFormData());
   };
 
   const openViewModal = (analysis: ViralAnalysis) => {
@@ -242,16 +283,15 @@ export default function AnalysesPage() {
     reviewMutation.mutate({ id: viewingAnalysis.id, data: reviewData });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.hook && !formData.hookVoiceNote) {
+  const handleSubmit = (data: AnalysisFormData) => {
+    if (!data.hook && !data.hookVoiceNote) {
       toast.error('Please provide a hook either by typing or voice note');
       return;
     }
     if (editingAnalysis) {
-      updateMutation.mutate({ id: editingAnalysis.id, data: formData });
+      updateMutation.mutate({ id: editingAnalysis.id, data });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(data);
     }
   };
 
@@ -375,31 +415,15 @@ export default function AnalysesPage() {
         </div>
       )}
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={closeModal}></div>
-            <div className="relative bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                  {editingAnalysis ? 'Edit Viral Content Analysis' : 'Analyze Viral Content'}
-                </h2>
-                <p className="text-sm text-gray-600 mb-6">
-                  Break down what made this content viral and how to replicate it
-                </p>
-                <DynamicAnalysisForm
-                  key={isModalOpen ? 'form-open' : 'form-closed'}
-                  formData={formData}
-                  onChange={(updates) => setFormData({ ...formData, ...updates })}
-                  onSubmit={handleSubmit}
-                  onCancel={closeModal}
-                  isEditing={!!editingAnalysis}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Multi-Step Analysis Wizard */}
+      <MultiStepAnalysisWizard
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        onSubmit={handleSubmit}
+        isSubmitting={createMutation.isPending || updateMutation.isPending}
+        editingAnalysis={editingAnalysis}
+        initialFormData={formData}
+      />
 
       {isViewModalOpen && viewingAnalysis && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
