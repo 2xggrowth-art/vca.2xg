@@ -305,19 +305,23 @@ export default function AnalysesPage() {
   };
 
   return (
-    <div>
-      <div className="mb-8 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Viral Content Analyses</h1>
-          <p className="mt-2 text-gray-600">Analyze viral content and create replication strategies</p>
+    <div className="pb-24 md:pb-8">
+      {/* Mobile-First Header - Stacked on mobile, side-by-side on desktop */}
+      <div className="mb-6 md:mb-8">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Your Videos</h1>
+            <p className="mt-1 md:mt-2 text-sm md:text-base text-gray-600">Analyze viral content and create strategies</p>
+          </div>
+          {/* Desktop Button */}
+          <button
+            onClick={() => openModal()}
+            className="hidden md:inline-flex items-center px-6 py-3 border border-transparent shadow-sm text-base font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 transition min-h-[48px]"
+          >
+            <PlusIcon className="h-5 w-5 mr-2" />
+            Add New Video
+          </button>
         </div>
-        <button
-          onClick={() => openModal()}
-          className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
-        >
-          <PlusIcon className="h-5 w-5 mr-2" />
-          New Analysis
-        </button>
       </div>
 
       {isLoading ? (
@@ -325,9 +329,9 @@ export default function AnalysesPage() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
         </div>
       ) : analyses && analyses.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
           {analyses.map((analysis: ViralAnalysis) => (
-            <div key={analysis.id} className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-6">
+            <div key={analysis.id} className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 p-4 md:p-6 border-l-4 border-transparent hover:border-primary-500">
               <div className="flex justify-between items-start mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">
                   {analysis.hook || 'Untitled Analysis'}
@@ -380,25 +384,27 @@ export default function AnalysesPage() {
                   </div>
                 )}
               </div>
-              <div className="flex space-x-2">
+              {/* Touch-Friendly Action Buttons */}
+              <div className="flex gap-2 md:gap-3">
                 <button
                   onClick={() => openViewModal(analysis)}
-                  className="flex-1 inline-flex justify-center items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                  className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] border border-gray-300 shadow-sm text-sm md:text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition"
                 >
-                  <EyeIcon className="h-4 w-4 mr-1" />
+                  <EyeIcon className="h-5 w-5 mr-2" />
                   View
                 </button>
                 {(analysis.status === 'PENDING' || analysis.status === 'REJECTED') && !analysis.is_dissolved && (
                   <button
                     onClick={() => openModal(analysis)}
-                    className={`flex-1 inline-flex justify-center items-center px-3 py-2 border shadow-sm text-sm font-medium rounded-md ${
+                    className={`flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] border shadow-sm text-sm md:text-base font-medium rounded-lg transition ${
                       analysis.status === 'REJECTED'
-                        ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100'
-                        : 'border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100'
+                        ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100 active:bg-red-200'
+                        : 'border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100 active:bg-primary-200'
                     }`}
                   >
-                    <PencilIcon className="h-4 w-4 mr-1" />
-                    {analysis.status === 'REJECTED' ? 'Revise & Resubmit' : 'Edit'}
+                    <PencilIcon className="h-5 w-5 mr-2" />
+                    <span className="hidden sm:inline">{analysis.status === 'REJECTED' ? 'Revise & Resubmit' : 'Edit'}</span>
+                    <span className="sm:hidden">Edit</span>
                   </button>
                 )}
               </div>
@@ -406,12 +412,38 @@ export default function AnalysesPage() {
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No analyses yet</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by analyzing your first viral content piece.</p>
+        <div className="bg-white rounded-xl shadow-md p-8 md:p-12 text-center">
+          <div className="max-w-sm mx-auto">
+            {/* Friendly Icon */}
+            <div className="mx-auto w-16 h-16 md:w-20 md:h-20 bg-primary-50 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 md:w-10 md:h-10 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg md:text-xl font-semibold text-gray-900 mb-2">No videos yet</h3>
+            <p className="text-sm md:text-base text-gray-600 mb-6">Start by analyzing your first viral video! We'll help you understand what makes it successful.</p>
+            {/* Mobile CTA */}
+            <button
+              onClick={() => openModal()}
+              className="md:hidden inline-flex items-center justify-center px-6 py-3 min-h-[56px] w-full border border-transparent shadow-lg text-base font-semibold rounded-lg text-white bg-primary-600 hover:bg-primary-700 active:bg-primary-800 transition"
+            >
+              <PlusIcon className="h-6 w-6 mr-2" />
+              Add Your First Video
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Fixed Bottom Action Button (Mobile Only) */}
+      {analyses && analyses.length > 0 && (
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 safe-area-bottom z-40">
+          <button
+            onClick={() => openModal()}
+            className="w-full inline-flex items-center justify-center px-6 py-3 min-h-[56px] border border-transparent shadow-lg text-base font-semibold rounded-lg text-white bg-primary-600 hover:bg-primary-700 active:bg-primary-800 transition"
+          >
+            <PlusIcon className="h-6 w-6 mr-2" />
+            Add New Video
+          </button>
         </div>
       )}
 
