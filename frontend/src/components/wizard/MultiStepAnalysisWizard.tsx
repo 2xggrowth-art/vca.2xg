@@ -1,10 +1,9 @@
 /**
  * Multi-Step Analysis Wizard
  *
- * A 3-level wizard for creating viral content analyses:
+ * A 2-level wizard for creating viral content analyses:
  * - Level 1: Easy (Basic Info)
  * - Level 2: Advanced (Details & Tags)
- * - Level 3: Hook Study (Final Details)
  */
 
 import { useState } from 'react';
@@ -13,7 +12,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import WizardProgress from './WizardProgress';
 import WizardLevel1 from './WizardLevel1';
 import WizardLevel2 from './WizardLevel2';
-import WizardLevel3 from './WizardLevel3';
 import type { AnalysisFormData, ViralAnalysis } from '@/types';
 
 interface MultiStepAnalysisWizardProps {
@@ -25,7 +23,7 @@ interface MultiStepAnalysisWizardProps {
   initialFormData: AnalysisFormData;
 }
 
-type WizardLevel = 1 | 2 | 3;
+type WizardLevel = 1 | 2;
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -71,7 +69,7 @@ export default function MultiStepAnalysisWizard({
   };
 
   const goNext = () => {
-    if (currentLevel < 3) {
+    if (currentLevel < 2) {
       setDirection(1);
       setCurrentLevel((prev) => (prev + 1) as WizardLevel);
     }
@@ -109,7 +107,7 @@ export default function MultiStepAnalysisWizard({
                   {editingAnalysis ? 'Edit Analysis' : 'New Viral Content Analysis'}
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Complete all three levels to submit your analysis
+                  Complete both levels to submit your analysis
                 </p>
               </div>
               <button
@@ -142,9 +140,6 @@ export default function MultiStepAnalysisWizard({
                 {currentLevel === 2 && (
                   <WizardLevel2 formData={formData} onChange={handleFormChange} />
                 )}
-                {currentLevel === 3 && (
-                  <WizardLevel3 formData={formData} onChange={handleFormChange} />
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -176,12 +171,12 @@ export default function MultiStepAnalysisWizard({
 
               {/* Level Indicator */}
               <div className="text-sm text-gray-500">
-                Level {currentLevel} of 3
+                Level {currentLevel} of 2
               </div>
 
               {/* Next/Submit Button */}
               <div>
-                {currentLevel < 3 ? (
+                {currentLevel < 2 ? (
                   <button
                     type="button"
                     onClick={goNext}

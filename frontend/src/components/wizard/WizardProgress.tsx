@@ -1,19 +1,18 @@
 /**
  * Wizard Progress Indicator
- * Shows the current step in the 3-level analysis wizard
+ * Shows the current step in the 2-level analysis wizard
  */
 
 import { CheckIcon } from '@heroicons/react/24/solid';
 
 interface WizardProgressProps {
-  currentLevel: 1 | 2 | 3;
-  onLevelClick?: (level: 1 | 2 | 3) => void;
+  currentLevel: 1 | 2;
+  onLevelClick?: (level: 1 | 2) => void;
 }
 
 const levels = [
   { number: 1, title: 'Easy', description: 'Basic Info' },
   { number: 2, title: 'Advanced', description: 'Details & Tags' },
-  { number: 3, title: 'Hook Study', description: 'Final Details' },
 ] as const;
 
 export default function WizardProgress({ currentLevel, onLevelClick }: WizardProgressProps) {
@@ -39,7 +38,7 @@ export default function WizardProgress({ currentLevel, onLevelClick }: WizardPro
 
               <button
                 type="button"
-                onClick={() => isClickable && onLevelClick(level.number as 1 | 2 | 3)}
+                onClick={() => isClickable && onLevelClick(level.number as 1 | 2)}
                 disabled={!isClickable}
                 className={`relative flex flex-col items-center group ${
                   isClickable ? 'cursor-pointer' : 'cursor-default'
