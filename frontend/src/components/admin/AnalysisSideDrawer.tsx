@@ -302,19 +302,19 @@ export default function AnalysisSideDrawer({
             onClick={handleClose}
           />
 
-          {/* Drawer */}
+          {/* Drawer - Mobile-Responsive */}
           <motion.div
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.3 }}
-            className="fixed inset-y-0 right-0 w-full max-w-xl bg-white shadow-xl z-50 flex flex-col"
+            className="fixed inset-y-0 right-0 w-full md:max-w-2xl bg-white shadow-xl z-50 flex flex-col"
           >
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4">
+            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 md:px-6 py-3 md:py-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900">
+                  <h2 className="text-base md:text-lg font-bold text-gray-900">
                     Analysis Details
                   </h2>
                   {analysis && (
@@ -330,16 +330,16 @@ export default function AnalysisSideDrawer({
                 </div>
                 <button
                   onClick={handleClose}
-                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                  className="p-2 min-w-[48px] min-h-[48px] flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition active:bg-gray-200"
                 >
-                  <XMarkIcon className="w-5 h-5" />
+                  <XMarkIcon className="w-5 h-5 md:w-6 md:h-6" />
                 </button>
               </div>
             </div>
 
             {/* Content */}
             {analysis && (
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              <div className="flex-1 overflow-y-auto px-4 md:px-6 py-3 md:py-4 space-y-3 md:space-y-4">
                 {/* Submitter Info */}
                 <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
                   <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
@@ -863,13 +863,13 @@ export default function AnalysisSideDrawer({
 
             {/* Footer with Actions - PENDING Scripts */}
             {analysis && analysis.status === 'PENDING' && (onApprove || onReject) && (
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4">
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 md:px-6 py-3 md:py-4">
                 {!showRejectFeedback ? (
-                  <div className="flex space-x-3">
+                  <div className="flex flex-col md:flex-row gap-3">
                     {onReject && (
                       <button
                         onClick={() => setShowRejectFeedback(true)}
-                        className="flex-1 inline-flex justify-center items-center px-4 py-2.5 border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 font-medium transition"
+                        className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 active:bg-red-200 font-medium transition text-sm md:text-base"
                       >
                         <XCircleIcon className="w-5 h-5 mr-2" />
                         Reject
@@ -879,7 +879,7 @@ export default function AnalysisSideDrawer({
                       <button
                         onClick={handleApprove}
                         disabled={isSubmitting}
-                        className="flex-1 inline-flex justify-center items-center px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition disabled:opacity-50"
+                        className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 font-medium transition disabled:opacity-50 text-sm md:text-base"
                       >
                         {isSubmitting ? (
                           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
@@ -897,19 +897,19 @@ export default function AnalysisSideDrawer({
                       onChange={(e) => setFeedback(e.target.value)}
                       placeholder="Provide feedback for rejection (required)..."
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 min-h-[48px] border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-sm"
                     />
-                    <div className="flex space-x-3">
+                    <div className="flex flex-col md:flex-row gap-3">
                       <button
                         onClick={() => setShowRejectFeedback(false)}
-                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition"
+                        className="flex-1 px-4 py-3 min-h-[48px] border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 active:bg-gray-100 font-medium transition text-sm md:text-base"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleReject}
                         disabled={isSubmitting || !feedback.trim()}
-                        className="flex-1 inline-flex justify-center items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition disabled:opacity-50"
+                        className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800 font-medium transition disabled:opacity-50 text-sm md:text-base"
                       >
                         {isSubmitting ? (
                           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
@@ -926,18 +926,18 @@ export default function AnalysisSideDrawer({
 
             {/* Footer with Actions - APPROVED Scripts (Disapprove) */}
             {analysis && analysis.status === 'APPROVED' && onDisapprove && (
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4">
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 md:px-6 py-3 md:py-4">
                 {!showDisapproveFeedback ? (
                   <div className="space-y-3">
                     {/* Info message */}
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <p className="text-xs text-blue-800">
+                      <p className="text-xs md:text-sm text-blue-800">
                         ℹ️ This script is already approved. You can disapprove it to send it back for revision.
                       </p>
                     </div>
                     <button
                       onClick={() => setShowDisapproveFeedback(true)}
-                      className="w-full inline-flex justify-center items-center px-4 py-2.5 border border-orange-300 text-orange-700 bg-orange-50 rounded-lg hover:bg-orange-100 font-medium transition"
+                      className="w-full inline-flex justify-center items-center px-4 py-3 min-h-[48px] border border-orange-300 text-orange-700 bg-orange-50 rounded-lg hover:bg-orange-100 active:bg-orange-200 font-medium transition text-sm md:text-base"
                     >
                       <ExclamationTriangleIcon className="w-5 h-5 mr-2" />
                       Disapprove Script
@@ -960,19 +960,19 @@ export default function AnalysisSideDrawer({
                       onChange={(e) => setDisapprovalReason(e.target.value)}
                       placeholder="Explain why you're disapproving this approved script (required)..."
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 min-h-[48px] border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
                     />
-                    <div className="flex space-x-3">
+                    <div className="flex flex-col md:flex-row gap-3">
                       <button
                         onClick={() => setShowDisapproveFeedback(false)}
-                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition"
+                        className="flex-1 px-4 py-3 min-h-[48px] border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 active:bg-gray-100 font-medium transition text-sm md:text-base"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleDisapprove}
                         disabled={isSubmitting || !disapprovalReason.trim()}
-                        className="flex-1 inline-flex justify-center items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium transition disabled:opacity-50"
+                        className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] bg-orange-600 text-white rounded-lg hover:bg-orange-700 active:bg-orange-800 font-medium transition disabled:opacity-50 text-sm md:text-base"
                       >
                         {isSubmitting ? (
                           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />

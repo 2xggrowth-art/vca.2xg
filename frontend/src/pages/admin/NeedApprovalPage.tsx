@@ -8,7 +8,6 @@ import toast from 'react-hot-toast';
 import type { ViralAnalysis, ProductionFile, ReviewAnalysisData, UpdateProductionStageData } from '@/types';
 import { DocumentTextIcon, VideoCameraIcon, FilmIcon, CheckCircleIcon, XCircleIcon, EyeIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import AssignTeamModal from '@/components/AssignTeamModal';
-import ScriptViewModal from '@/components/admin/ScriptViewModal';
 import RejectScriptModal from '@/components/admin/RejectScriptModal';
 import AnalysisSideDrawer from '@/components/admin/AnalysisSideDrawer';
 
@@ -19,7 +18,7 @@ export default function NeedApprovalPage() {
   const [selectedEdit, setSelectedEdit] = useState<ViralAnalysis | null>(null);
   const [selectedApprovedScript, setSelectedApprovedScript] = useState<ViralAnalysis | null>(null);
   const [showAssignTeamModal, setShowAssignTeamModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
+  const [showPendingDrawer, setShowPendingDrawer] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showApprovedDrawer, setShowApprovedDrawer] = useState(false);
 
@@ -325,7 +324,7 @@ export default function NeedApprovalPage() {
                       <button
                         onClick={() => {
                           setSelectedScript(script);
-                          setShowViewModal(true);
+                          setShowPendingDrawer(true);
                         }}
                         className="px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition flex items-center"
                       >
@@ -647,14 +646,17 @@ export default function NeedApprovalPage() {
         </section>
       </div>
 
-      {/* Script View Modal */}
+      {/* Pending Script Drawer - Comprehensive View */}
       {selectedScript && (
-        <ScriptViewModal
-          script={selectedScript}
-          isOpen={showViewModal}
+        <AnalysisSideDrawer
+          analysis={selectedScript}
+          isOpen={showPendingDrawer}
           onClose={() => {
-            setShowViewModal(false);
+            setShowPendingDrawer(false);
             setSelectedScript(null);
+            // Refresh pending scripts list
+            queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
           }}
           onApprove={() => {
             approveScriptMutation.mutate({
