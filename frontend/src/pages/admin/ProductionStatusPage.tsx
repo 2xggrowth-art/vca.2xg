@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { ChartBarIcon, MagnifyingGlassIcon, CheckCircleIcon, ExclamationTriangleIcon, MinusCircleIcon, ArrowDownTrayIcon, EyeIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { ProductionStage } from '@/types';
 import type { ViralAnalysis } from '@/types';
+import ProductionDetailDrawer from '@/components/admin/ProductionDetailDrawer';
 
 type TabType = 'unassigned' | 'shooting' | 'editing' | 'ready' | 'posted';
 
@@ -19,6 +20,8 @@ interface ProductionFile {
 export default function ProductionStatusPage() {
   const [activeTab, setActiveTab] = useState<TabType>('unassigned');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAnalysis, setSelectedAnalysis] = useState<ViralAnalysis | null>(null);
+  const [showDetailDrawer, setShowDetailDrawer] = useState(false);
 
   // Fetch all approved analyses
   const { data: analyses = [], isLoading } = useQuery({
@@ -388,6 +391,10 @@ export default function ProductionStatusPage() {
                         </td>
                         <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
                           <button
+                            onClick={() => {
+                              setSelectedAnalysis(project);
+                              setShowDetailDrawer(true);
+                            }}
                             className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
                             title="View details"
                           >
@@ -403,6 +410,16 @@ export default function ProductionStatusPage() {
           </div>
         )}
       </div>
+
+      {/* Production Detail Drawer */}
+      <ProductionDetailDrawer
+        analysis={selectedAnalysis}
+        isOpen={showDetailDrawer}
+        onClose={() => {
+          setShowDetailDrawer(false);
+          setSelectedAnalysis(null);
+        }}
+      />
     </div>
   );
 }
