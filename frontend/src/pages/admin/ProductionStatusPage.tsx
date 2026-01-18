@@ -32,24 +32,27 @@ export default function ProductionStatusPage() {
         .select(`
           *,
           profiles:user_id (email, full_name, avatar_url),
-          assignments:project_assignments (
-            *,
-            user:profiles!project_assignments_user_id_fkey (id, email, full_name, avatar_url, role)
+          project_assignments (
+            role,
+            user:user_id (id, email, full_name, avatar_url)
           )
         `)
         .eq('status', 'APPROVED')
         .order('updated_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase query error:', error);
+        throw error;
+      }
 
       return data.map((item: any) => ({
         ...item,
         email: item.profiles?.email,
         full_name: item.profiles?.full_name,
         avatar_url: item.profiles?.avatar_url,
-        videographer: item.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
-        editor: item.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
-        posting_manager: item.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+        videographer: item.project_assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
+        editor: item.project_assignments?.find((a: any) => a.role === 'EDITOR')?.user,
+        posting_manager: item.project_assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
       })) as ViralAnalysis[];
     },
   });
@@ -106,6 +109,18 @@ export default function ProductionStatusPage() {
     a.production_stage === ProductionStage.READY_TO_POST
   );
   const posted = filteredAnalyses.filter(a => a.production_stage === ProductionStage.POSTED);
+
+  // Debug: Log production stages
+  const stageBreakdown = filteredAnalyses.reduce((acc: any, a) => {
+    const stage = a.production_stage || 'NOT_STARTED';
+    acc[stage] = (acc[stage] || 0) + 1;
+    return acc;
+  }, {});
+
+  console.log('Stage breakdown:', stageBreakdown);
+  console.log('Editing count:', editing.length);
+  console.log('Scripts in EDITING stage:', filteredAnalyses.filter(a => a.production_stage === 'EDITING').map(a => a.content_id));
+  console.log('Scripts in EDIT_REVIEW stage:', filteredAnalyses.filter(a => a.production_stage === 'EDIT_REVIEW').map(a => a.content_id));
 
   const tabs = [
     { id: 'unassigned' as TabType, label: 'Unassigned', count: unassigned.length, color: 'red' },
