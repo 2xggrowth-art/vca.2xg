@@ -90,6 +90,8 @@ export default function ProductionDetailDrawer({
   const handleAssignTeam = (e: React.FormEvent) => {
     e.preventDefault();
 
+    console.log('Assign team form data:', formData);
+
     // Validate at least one team member is assigned
     if (
       !formData.videographerId &&
@@ -103,6 +105,7 @@ export default function ProductionDetailDrawer({
       return;
     }
 
+    console.log('Submitting assignment:', formData);
     assignMutation.mutate(formData);
   };
 
@@ -302,9 +305,9 @@ export default function ProductionDetailDrawer({
                           })
                         }
                         disabled={formData.autoAssignVideographer}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100"
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                       >
-                        <option value="">Select videographer</option>
+                        <option value="">{formData.autoAssignVideographer ? 'Will auto-assign (lowest workload)' : 'Select videographer'}</option>
                         {videographers.map((v: any) => (
                           <option key={v.id} value={v.id}>
                             {v.full_name || v.email}
@@ -344,9 +347,9 @@ export default function ProductionDetailDrawer({
                           })
                         }
                         disabled={formData.autoAssignEditor}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100"
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                       >
-                        <option value="">Select editor</option>
+                        <option value="">{formData.autoAssignEditor ? 'Will auto-assign (lowest workload)' : 'Select editor'}</option>
                         {editors.map((e: any) => (
                           <option key={e.id} value={e.id}>
                             {e.full_name || e.email}
@@ -386,9 +389,9 @@ export default function ProductionDetailDrawer({
                           })
                         }
                         disabled={formData.autoAssignPostingManager}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100"
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                       >
-                        <option value="">Select posting manager</option>
+                        <option value="">{formData.autoAssignPostingManager ? 'Will auto-assign (lowest workload)' : 'Select posting manager'}</option>
                         {postingManagers.map((pm: any) => (
                           <option key={pm.id} value={pm.id}>
                             {pm.full_name || pm.email}
