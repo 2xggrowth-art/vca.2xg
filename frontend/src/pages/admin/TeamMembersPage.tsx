@@ -140,6 +140,25 @@ export default function TeamMembersPage() {
     },
   });
 
+  // Fetch content_ids for script writers (for search functionality)
+  const { data: scriptWriterContentIds = {} } = useQuery({
+    queryKey: ['admin', 'script-writer-content-ids'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('viral_analyses')
+        .select('user_id, content_id');
+
+      if (error) throw error;
+
+      const contentIds: Record<string, string[]> = {};
+      data.forEach((item: any) => {
+        if (!contentIds[item.user_id]) contentIds[item.user_id] = [];
+        if (item.content_id) contentIds[item.user_id].push(item.content_id.toLowerCase());
+      });
+      return contentIds;
+    },
+  });
+
   // Fetch stats for videographers
   const { data: videographerStats = {} } = useQuery({
     queryKey: ['admin', 'videographer-stats'],
@@ -272,13 +291,17 @@ export default function TeamMembersPage() {
   const filteredScriptWriters = useMemo(() => {
     let result = [...groupedMembers.SCRIPT_WRITER];
 
-    // Apply search filter
+    // Apply search filter (name, email, or content_id)
     if (scriptWriterSearch.trim()) {
       const search = scriptWriterSearch.toLowerCase();
-      result = result.filter(member =>
-        (member.full_name?.toLowerCase().includes(search)) ||
-        member.email.toLowerCase().includes(search)
-      );
+      result = result.filter(member => {
+        const userContentIds = scriptWriterContentIds[member.id] || [];
+        return (
+          (member.full_name?.toLowerCase().includes(search)) ||
+          member.email.toLowerCase().includes(search) ||
+          userContentIds.some(id => id.includes(search))
+        );
+      });
     }
 
     // Apply column filters
@@ -353,7 +376,7 @@ export default function TeamMembersPage() {
     }
 
     return result;
-  }, [groupedMembers.SCRIPT_WRITER, scriptWriterSearch, scriptWriterFilters, scriptWriterSort, scriptWriterStats]);
+  }, [groupedMembers.SCRIPT_WRITER, scriptWriterSearch, scriptWriterFilters, scriptWriterSort, scriptWriterStats, scriptWriterContentIds]);
 
   const filteredVideographers = useMemo(() => {
     if (!videographerSearch.trim()) return groupedMembers.VIDEOGRAPHER;
@@ -443,7 +466,7 @@ export default function TeamMembersPage() {
                     type="text"
                     value={scriptWriterSearch}
                     onChange={(e) => setScriptWriterSearch(e.target.value)}
-                    placeholder="Search by name or email..."
+                    placeholder="Search by name, email, or content ID..."
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                   />
                 </div>

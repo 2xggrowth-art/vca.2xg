@@ -1,13 +1,28 @@
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { ChartBarIcon } from '@heroicons/react/24/outline';
+import { ChartBarIcon, MagnifyingGlassIcon, CheckCircleIcon, ExclamationTriangleIcon, MinusCircleIcon, ArrowDownTrayIcon, EyeIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { ProductionStage } from '@/types';
 import type { ViralAnalysis } from '@/types';
 
+type TabType = 'unassigned' | 'shooting' | 'editing' | 'ready' | 'posted';
+
+interface ProductionFile {
+  id: string;
+  file_type: string;
+  file_name: string;
+  file_url: string;
+  uploaded_at: string;
+  uploaded_by: string;
+}
+
 export default function ProductionStatusPage() {
-  // Fetch all approved analyses in production
+  const [activeTab, setActiveTab] = useState<TabType>('unassigned');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Fetch all approved analyses
   const { data: analyses = [], isLoading } = useQuery({
-    queryKey: ['admin', 'production-status'],
+    queryKey: ['admin', 'production-all'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('viral_analyses')
@@ -36,29 +51,117 @@ export default function ProductionStatusPage() {
     },
   });
 
-  // Calculate pipeline stats (no double-counting)
-  const pipelineStats = {
-    scriptDone: analyses.filter(a => a.production_stage === ProductionStage.PRE_PRODUCTION || a.production_stage === ProductionStage.NOT_STARTED).length,
-    shootActive: analyses.filter(a => a.production_stage === ProductionStage.SHOOTING).length,
-    shootDone: analyses.filter(a => a.production_stage === ProductionStage.SHOOT_REVIEW).length,
-    editActive: analyses.filter(a => a.production_stage === ProductionStage.EDITING).length,
-    editDone: analyses.filter(a => a.production_stage === ProductionStage.EDIT_REVIEW || a.production_stage === ProductionStage.FINAL_REVIEW || a.production_stage === ProductionStage.READY_TO_POST).length,
-    readyToPost: analyses.filter(a => a.production_stage === ProductionStage.READY_TO_POST).length,
-    posted: analyses.filter(a => a.production_stage === ProductionStage.POSTED).length,
+  // Fetch production files for all analyses
+  const { data: productionFiles = {} } = useQuery({
+    queryKey: ['admin', 'production-files-all'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('production_files')
+        .select('*')
+        .eq('is_deleted', false);
+
+      if (error) throw error;
+
+      // Group files by analysis_id
+      const filesByAnalysis: Record<string, ProductionFile[]> = {};
+      (data || []).forEach((file: any) => {
+        if (!filesByAnalysis[file.analysis_id]) {
+          filesByAnalysis[file.analysis_id] = [];
+        }
+        filesByAnalysis[file.analysis_id].push(file);
+      });
+      return filesByAnalysis;
+    },
+  });
+
+  // Filter by search
+  const filteredAnalyses = useMemo(() => {
+    if (!searchQuery.trim()) return analyses;
+    const search = searchQuery.toLowerCase();
+    return analyses.filter(a =>
+      a.content_id?.toLowerCase().includes(search) ||
+      a.hook?.toLowerCase().includes(search) ||
+      a.videographer?.full_name?.toLowerCase().includes(search) ||
+      a.editor?.full_name?.toLowerCase().includes(search) ||
+      a.posting_manager?.full_name?.toLowerCase().includes(search)
+    );
+  }, [analyses, searchQuery]);
+
+  // Group by tabs
+  const unassigned = filteredAnalyses.filter(a => !a.videographer && !a.editor && !a.posting_manager);
+  const shooting = filteredAnalyses.filter(a =>
+    a.production_stage === ProductionStage.PRE_PRODUCTION ||
+    a.production_stage === ProductionStage.SHOOTING ||
+    a.production_stage === ProductionStage.SHOOT_REVIEW
+  );
+  const editing = filteredAnalyses.filter(a =>
+    a.production_stage === ProductionStage.EDITING ||
+    a.production_stage === ProductionStage.EDIT_REVIEW
+  );
+  const ready = filteredAnalyses.filter(a =>
+    a.production_stage === ProductionStage.FINAL_REVIEW ||
+    a.production_stage === ProductionStage.READY_TO_POST
+  );
+  const posted = filteredAnalyses.filter(a => a.production_stage === ProductionStage.POSTED);
+
+  const tabs = [
+    { id: 'unassigned' as TabType, label: 'Unassigned', count: unassigned.length, color: 'red' },
+    { id: 'shooting' as TabType, label: 'Shooting', count: shooting.length, color: 'indigo' },
+    { id: 'editing' as TabType, label: 'Editing', count: editing.length, color: 'purple' },
+    { id: 'ready' as TabType, label: 'Ready to Post', count: ready.length, color: 'green' },
+    { id: 'posted' as TabType, label: 'Posted', count: posted.length, color: 'emerald' },
+  ];
+
+  const getCurrentData = () => {
+    switch (activeTab) {
+      case 'unassigned': return unassigned;
+      case 'shooting': return shooting;
+      case 'editing': return editing;
+      case 'ready': return ready;
+      case 'posted': return posted;
+      default: return [];
+    }
   };
 
-  const getStageColor = (stage?: string) => {
-    switch (stage) {
-      case ProductionStage.NOT_STARTED: return 'bg-gray-100 text-gray-800';
-      case ProductionStage.PRE_PRODUCTION: return 'bg-blue-100 text-blue-800';
-      case ProductionStage.SHOOTING: return 'bg-indigo-100 text-indigo-800';
-      case ProductionStage.SHOOT_REVIEW: return 'bg-yellow-100 text-yellow-800';
-      case ProductionStage.EDITING: return 'bg-purple-100 text-purple-800';
-      case ProductionStage.EDIT_REVIEW: return 'bg-pink-100 text-pink-800';
-      case ProductionStage.FINAL_REVIEW: return 'bg-orange-100 text-orange-800';
-      case ProductionStage.READY_TO_POST: return 'bg-green-100 text-green-800';
-      case ProductionStage.POSTED: return 'bg-emerald-100 text-emerald-800';
-      default: return 'bg-gray-100 text-gray-800';
+  const getDaysInStage = (updatedAt: string) => {
+    const days = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+    return days;
+  };
+
+  const getFileStatus = (analysisId: string, requiredFileType: string, deadline?: string) => {
+    const files = productionFiles[analysisId] || [];
+    const hasFile = files.some(f => f.file_type === requiredFileType);
+
+    if (hasFile) {
+      const file = files.find(f => f.file_type === requiredFileType);
+      return { status: 'uploaded', file, icon: CheckCircleIcon, color: 'text-green-600' };
+    }
+
+    if (deadline && new Date(deadline) < new Date()) {
+      return { status: 'overdue', file: null, icon: ExclamationTriangleIcon, color: 'text-orange-600' };
+    }
+
+    return { status: 'pending', file: null, icon: MinusCircleIcon, color: 'text-gray-400' };
+  };
+
+  const handleViewFile = (fileUrl: string) => {
+    window.open(fileUrl, '_blank');
+  };
+
+  const handleDownloadFile = async (fileUrl: string, fileName: string) => {
+    try {
+      const response = await fetch(fileUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Download failed:', error);
     }
   };
 
@@ -72,315 +175,232 @@ export default function ProductionStatusPage() {
     }
   };
 
-  const groupByStage = (stage: ProductionStage) => {
-    return analyses.filter(a => a.production_stage === stage);
+  const getStageColor = (stage?: string) => {
+    switch (stage) {
+      case ProductionStage.PRE_PRODUCTION: return 'bg-blue-100 text-blue-800';
+      case ProductionStage.SHOOTING: return 'bg-indigo-100 text-indigo-800';
+      case ProductionStage.SHOOT_REVIEW: return 'bg-yellow-100 text-yellow-800';
+      case ProductionStage.EDITING: return 'bg-purple-100 text-purple-800';
+      case ProductionStage.EDIT_REVIEW: return 'bg-pink-100 text-pink-800';
+      case ProductionStage.FINAL_REVIEW: return 'bg-orange-100 text-orange-800';
+      case ProductionStage.READY_TO_POST: return 'bg-green-100 text-green-800';
+      case ProductionStage.POSTED: return 'bg-emerald-100 text-emerald-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
   };
 
   return (
     <div className="flex-1 bg-gray-50 overflow-auto">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-          <ChartBarIcon className="w-7 h-7 mr-3 text-primary-600" />
-          Production Status
-        </h1>
-        <p className="text-gray-600 mt-1">
-          {analyses.length} project{analyses.length !== 1 ? 's' : ''} in production pipeline
-        </p>
+      <div className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 md:py-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center">
+              <ChartBarIcon className="w-6 h-6 md:w-7 md:h-7 mr-2 md:mr-3 text-primary-600" />
+              Production Status
+            </h1>
+            <p className="text-sm text-gray-600 mt-1">
+              {filteredAnalyses.length} project{filteredAnalyses.length !== 1 ? 's' : ''} in pipeline
+            </p>
+          </div>
+          <div className="relative w-full md:w-96">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by content ID, hook, team..."
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white border-b border-gray-200 px-4 md:px-8">
+        <div className="flex overflow-x-auto hide-scrollbar">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`
+                flex-shrink-0 px-4 md:px-6 py-3 md:py-4 text-sm font-medium border-b-2 transition whitespace-nowrap
+                ${activeTab === tab.id
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }
+              `}
+            >
+              {tab.label}
+              <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                activeTab === tab.id ? `bg-${tab.color}-100 text-${tab.color}-800` : 'bg-gray-100 text-gray-600'
+              }`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="p-8 space-y-8">
-        {/* Pipeline Overview */}
-        <section className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-6">Pipeline Overview</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="text-2xl font-bold text-blue-600">{pipelineStats.scriptDone}</div>
-              <div className="text-xs text-gray-600 mt-1">Script Done</div>
-            </div>
-            <div className="text-center p-4 bg-indigo-50 rounded-lg border border-indigo-200">
-              <div className="text-2xl font-bold text-indigo-600">{pipelineStats.shootActive}</div>
-              <div className="text-xs text-gray-600 mt-1">Shoot Active</div>
-            </div>
-            <div className="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-              <div className="text-2xl font-bold text-yellow-600">{pipelineStats.shootDone}</div>
-              <div className="text-xs text-gray-600 mt-1">Shoot Done</div>
-            </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg border border-purple-200">
-              <div className="text-2xl font-bold text-purple-600">{pipelineStats.editActive}</div>
-              <div className="text-xs text-gray-600 mt-1">Edit Active</div>
-            </div>
-            <div className="text-center p-4 bg-pink-50 rounded-lg border border-pink-200">
-              <div className="text-2xl font-bold text-pink-600">{pipelineStats.editDone}</div>
-              <div className="text-xs text-gray-600 mt-1">Edit Done</div>
-            </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-              <div className="text-2xl font-bold text-green-600">{pipelineStats.readyToPost}</div>
-              <div className="text-xs text-gray-600 mt-1">Ready to Post</div>
-            </div>
-            <div className="text-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-              <div className="text-2xl font-bold text-emerald-600">{pipelineStats.posted}</div>
-              <div className="text-xs text-gray-600 mt-1">Posted</div>
-            </div>
-          </div>
-        </section>
-
+      <div className="p-4 md:p-8">
         {isLoading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
           </div>
+        ) : getCurrentData().length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-8 text-center">
+            <p className="text-gray-500">No projects in this stage</p>
+          </div>
         ) : (
-          <>
-            {/* Script Done (Pre-Production) */}
-            {pipelineStats.scriptDone > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    ✅ Script Done (Approved, in production)
-                  </h2>
-                  <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                    {pipelineStats.scriptDone} projects
-                  </span>
-                </div>
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Content ID
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[200px]">
+                      Hook/Title
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Stage
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Team
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Files
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Priority
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Deadline
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Days
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {getCurrentData().map((project) => {
+                    const daysInStage = getDaysInStage(project.updated_at);
+                    let fileStatus;
 
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Project
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Stage
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Videographer
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Priority
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Deadline
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {[...groupByStage(ProductionStage.NOT_STARTED), ...groupByStage(ProductionStage.PRE_PRODUCTION)].map((project) => (
-                        <tr key={project.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
-                              {project.hook || 'No hook provided'}
+                    if (activeTab === 'shooting') {
+                      fileStatus = getFileStatus(project.id, 'raw-footage', project.deadline);
+                    } else if (activeTab === 'editing') {
+                      fileStatus = getFileStatus(project.id, 'edited-video', project.deadline);
+                    } else if (activeTab === 'ready') {
+                      fileStatus = getFileStatus(project.id, 'final-video', project.deadline);
+                    }
+
+                    return (
+                      <tr key={project.id} className="hover:bg-gray-50">
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
+                          {project.content_id || '-'}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm text-gray-900">
+                          <div className="line-clamp-2 max-w-xs">
+                            {project.hook || 'No hook provided'}
+                          </div>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
+                            {project.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
+                          </span>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs text-gray-600">
+                          <div className="space-y-1">
+                            {project.videographer && (
+                              <div className="flex items-center gap-1">
+                                <span className="font-medium">V:</span>
+                                <span>{project.videographer.full_name || project.videographer.email}</span>
+                              </div>
+                            )}
+                            {project.editor && (
+                              <div className="flex items-center gap-1">
+                                <span className="font-medium">E:</span>
+                                <span>{project.editor.full_name || project.editor.email}</span>
+                              </div>
+                            )}
+                            {project.posting_manager && (
+                              <div className="flex items-center gap-1">
+                                <span className="font-medium">PM:</span>
+                                <span>{project.posting_manager.full_name || project.posting_manager.email}</span>
+                              </div>
+                            )}
+                            {!project.videographer && !project.editor && !project.posting_manager && (
+                              <span className="text-red-600 font-medium">Unassigned</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
+                          {fileStatus ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <fileStatus.icon className={`w-5 h-5 ${fileStatus.color}`} />
+                              {fileStatus.file && (
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={() => handleViewFile(fileStatus.file!.file_url)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="View file"
+                                  >
+                                    <EyeIcon className="w-4 h-4 text-gray-600" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadFile(fileStatus.file!.file_url, fileStatus.file!.file_name)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Download file"
+                                  >
+                                    <ArrowDownTrayIcon className="w-4 h-4 text-gray-600" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
-                              {project.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {project.videographer?.full_name || project.videographer?.email || '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
-                              {project.priority || 'NORMAL'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {project.deadline ? new Date(project.deadline).toLocaleDateString() : 'No deadline'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* Shoot Done */}
-            {pipelineStats.shootDone > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    🎬 Shoot Done (Approved, in editing)
-                  </h2>
-                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                    {pipelineStats.shootDone} projects
-                  </span>
-                </div>
-
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Project
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Stage
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Editor
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Priority
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Deadline
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {[...groupByStage(ProductionStage.EDITING)].map((project) => (
-                        <tr key={project.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
-                              {project.hook || 'No hook provided'}
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
+                            {project.priority || 'NORMAL'}
+                          </span>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
+                          {project.deadline ? (
+                            <div className={`${new Date(project.deadline) < new Date() ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                              {new Date(project.deadline).toLocaleDateString()}
                             </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
-                              {project.production_stage?.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {project.editor?.full_name || project.editor?.email || '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
-                              {project.priority || 'NORMAL'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {project.deadline ? new Date(project.deadline).toLocaleDateString() : 'No deadline'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* Edit Done */}
-            {pipelineStats.editDone > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    ✂️ Edit Done (Finalized, ready to post)
-                  </h2>
-                  <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                    {pipelineStats.editDone} projects
-                  </span>
-                </div>
-
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Project
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Stage
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Posting Manager
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Priority
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Post Date
-                        </th>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
+                          <span className={`${daysInStage > 7 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
+                            {daysInStage}d
+                          </span>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
+                          <button
+                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
+                            title="View details"
+                          >
+                            View <ChevronRightIcon className="w-4 h-4 ml-1" />
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {[...groupByStage(ProductionStage.FINAL_REVIEW), ...groupByStage(ProductionStage.READY_TO_POST)].map((project) => (
-                        <tr key={project.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
-                              {project.hook || 'No hook provided'}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
-                              {project.production_stage?.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {project.posting_manager?.full_name || project.posting_manager?.email || '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
-                              {project.priority || 'NORMAL'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {project.deadline ? new Date(project.deadline).toLocaleDateString() : 'TBD'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* Posted */}
-            {pipelineStats.posted > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    📱 Posted (Live on social media)
-                  </h2>
-                  <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium">
-                    {pipelineStats.posted} projects
-                  </span>
-                </div>
-
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Project
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Posted By
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Posted Date
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {groupByStage(ProductionStage.POSTED).slice(0, 20).map((project) => (
-                        <tr key={project.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
-                              {project.hook || 'No hook provided'}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {project.posting_manager?.full_name || project.posting_manager?.email || '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {new Date(project.updated_at).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {pipelineStats.posted > 20 && (
-                    <div className="bg-gray-50 px-6 py-3 text-sm text-gray-500 text-center border-t border-gray-200">
-                      Showing 20 of {pipelineStats.posted} posted projects
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-          </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
     </div>

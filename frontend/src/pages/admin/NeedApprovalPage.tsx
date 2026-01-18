@@ -3,10 +3,10 @@ import { supabase } from '@/lib/supabase';
 import { adminService } from '@/services/adminService';
 import { productionFilesService } from '@/services/productionFilesService';
 import { assignmentService } from '@/services/assignmentService';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import type { ViralAnalysis, ProductionFile, ReviewAnalysisData, UpdateProductionStageData } from '@/types';
-import { DocumentTextIcon, VideoCameraIcon, FilmIcon, CheckCircleIcon, XCircleIcon, EyeIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, VideoCameraIcon, FilmIcon, CheckCircleIcon, XCircleIcon, EyeIcon, ExclamationTriangleIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import AssignTeamModal from '@/components/AssignTeamModal';
 import RejectScriptModal from '@/components/admin/RejectScriptModal';
 import AnalysisSideDrawer from '@/components/admin/AnalysisSideDrawer';
@@ -21,6 +21,8 @@ export default function NeedApprovalPage() {
   const [showPendingDrawer, setShowPendingDrawer] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showApprovedDrawer, setShowApprovedDrawer] = useState(false);
+  const [pendingScriptSearch, setPendingScriptSearch] = useState('');
+  const [approvedScriptSearch, setApprovedScriptSearch] = useState('');
 
   // Fetch pending scripts
   const { data: pendingScripts = [], isLoading: scriptsLoading } = useQuery({
@@ -217,7 +219,31 @@ export default function NeedApprovalPage() {
     },
   });
 
-  const totalPending = pendingScripts.length + shootReviews.length + editReviews.length;
+  // Filter pending scripts by search
+  const filteredPendingScripts = useMemo(() => {
+    if (!pendingScriptSearch.trim()) return pendingScripts;
+    const search = pendingScriptSearch.toLowerCase();
+    return pendingScripts.filter((script: ViralAnalysis) =>
+      script.content_id?.toLowerCase().includes(search) ||
+      script.hook?.toLowerCase().includes(search) ||
+      script.full_name?.toLowerCase().includes(search) ||
+      script.email?.toLowerCase().includes(search)
+    );
+  }, [pendingScripts, pendingScriptSearch]);
+
+  // Filter approved scripts by search
+  const filteredApprovedScripts = useMemo(() => {
+    if (!approvedScriptSearch.trim()) return approvedScripts;
+    const search = approvedScriptSearch.toLowerCase();
+    return approvedScripts.filter((script: ViralAnalysis) =>
+      script.content_id?.toLowerCase().includes(search) ||
+      script.hook?.toLowerCase().includes(search) ||
+      script.full_name?.toLowerCase().includes(search) ||
+      script.email?.toLowerCase().includes(search)
+    );
+  }, [approvedScripts, approvedScriptSearch]);
+
+  const totalPending = filteredPendingScripts.length + shootReviews.length + editReviews.length;
 
   return (
     <div className="flex-1 bg-gray-50 overflow-hidden flex flex-col">
@@ -249,28 +275,40 @@ export default function NeedApprovalPage() {
       <div className="flex-1 overflow-y-auto p-8 space-y-8">
         {/* Script Submissions */}
         <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
             <h2 className="text-lg font-semibold text-gray-900 flex items-center">
               <DocumentTextIcon className="w-5 h-5 mr-2 text-yellow-600" />
               Script Submissions
+              <span className="ml-3 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                {filteredPendingScripts.length} {pendingScriptSearch ? 'found' : 'pending'}
+              </span>
             </h2>
-            <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
-              {pendingScripts.length} pending
-            </span>
+            <div className="relative w-full md:w-80">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                value={pendingScriptSearch}
+                onChange={(e) => setPendingScriptSearch(e.target.value)}
+                placeholder="Search by content ID, hook, name..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 text-sm"
+              />
+            </div>
           </div>
 
           {scriptsLoading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
             </div>
-          ) : pendingScripts.length === 0 ? (
+          ) : filteredPendingScripts.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
               <CheckCircleIcon className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">No scripts pending approval</p>
+              <p className="text-gray-500">
+                {pendingScriptSearch ? `No scripts found matching "${pendingScriptSearch}"` : 'No scripts pending approval'}
+              </p>
             </div>
           ) : (
             <div className="space-y-3 md:space-y-4">
-              {pendingScripts.map((script: ViralAnalysis) => (
+              {filteredPendingScripts.map((script: ViralAnalysis) => (
                 <div
                   key={script.id}
                   className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 hover:shadow-md transition"
@@ -555,28 +593,40 @@ export default function NeedApprovalPage() {
 
         {/* Approved Scripts Section */}
         <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
             <h2 className="text-lg font-semibold text-gray-900 flex items-center">
               <CheckCircleIcon className="w-5 h-5 mr-2 text-blue-600" />
               Approved Scripts
+              <span className="ml-3 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                {filteredApprovedScripts.length} {approvedScriptSearch ? 'found' : 'approved'}
+              </span>
             </h2>
-            <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-              {approvedScripts.length} approved
-            </span>
+            <div className="relative w-full md:w-80">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                value={approvedScriptSearch}
+                onChange={(e) => setApprovedScriptSearch(e.target.value)}
+                placeholder="Search by content ID, hook, name..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              />
+            </div>
           </div>
 
           {approvedLoading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
             </div>
-          ) : approvedScripts.length === 0 ? (
+          ) : filteredApprovedScripts.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
               <CheckCircleIcon className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">No approved scripts yet</p>
+              <p className="text-gray-500">
+                {approvedScriptSearch ? `No approved scripts found matching "${approvedScriptSearch}"` : 'No approved scripts yet'}
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {approvedScripts.map((script: ViralAnalysis) => (
+              {filteredApprovedScripts.map((script: ViralAnalysis) => (
                 <div
                   key={script.id}
                   className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition"
