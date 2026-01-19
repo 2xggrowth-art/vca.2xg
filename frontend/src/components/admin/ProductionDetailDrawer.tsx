@@ -380,6 +380,7 @@ export default function ProductionDetailDrawer({
 
               {/* Disapprove Script - Only show for early stage scripts */}
               {currentAnalysis.status === 'APPROVED' && (
+                !currentAnalysis.production_stage ||
                 currentAnalysis.production_stage === ProductionStage.NOT_STARTED ||
                 currentAnalysis.production_stage === ProductionStage.PRE_PRODUCTION ||
                 currentAnalysis.production_stage === ProductionStage.SHOOTING ||
