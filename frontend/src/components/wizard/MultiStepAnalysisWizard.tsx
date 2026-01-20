@@ -6,7 +6,7 @@
  * - Level 2: Advanced (Details & Tags)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { XMarkIcon, ArrowLeftIcon, ArrowRightIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { motion, AnimatePresence } from 'framer-motion';
 import WizardProgress from './WizardProgress';
@@ -51,6 +51,15 @@ export default function MultiStepAnalysisWizard({
   const [currentLevel, setCurrentLevel] = useState<WizardLevel>(1);
   const [direction, setDirection] = useState(0);
   const [formData, setFormData] = useState<AnalysisFormData>(initialFormData);
+
+  // Reset form when modal opens or initialFormData changes
+  useEffect(() => {
+    if (isOpen) {
+      setFormData(initialFormData);
+      setCurrentLevel(1);
+      setDirection(0);
+    }
+  }, [isOpen, initialFormData]);
 
   // Reset form when modal opens/closes or editing analysis changes
   const handleClose = () => {

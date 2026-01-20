@@ -2,10 +2,26 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
-import { ChartBarIcon, MagnifyingGlassIcon, CheckCircleIcon, ExclamationTriangleIcon, MinusCircleIcon, ArrowDownTrayIcon, EyeIcon, ChevronRightIcon, CalendarIcon, PlayIcon, SunIcon } from '@heroicons/react/24/outline';
-import { ProductionStage } from '@/types';
+import {
+  ChartBarIcon,
+  MagnifyingGlassIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+  MinusCircleIcon,
+  ArrowDownTrayIcon,
+  EyeIcon,
+  PlayIcon,
+  SunIcon,
+  ArrowPathIcon,
+  FlagIcon,
+  LinkIcon,
+} from '@heroicons/react/24/outline';
+import { ProductionStage, Priority } from '@/types';
 import type { ViralAnalysis } from '@/types';
-import ProductionDetailDrawer from '@/components/admin/ProductionDetailDrawer';
+import { SplitViewLayout } from '@/components/admin/layout/SplitViewLayout';
+import { BulkActionToolbar, type BulkAction } from '@/components/admin/layout/BulkActionToolbar';
+import { useSelection } from '@/hooks/useSelection';
+import ProductionDetailPanel from '@/components/admin/ProductionDetailPanel';
 
 type TabType = 'unassigned' | 'planning' | 'shooting' | 'editing' | 'ready' | 'posted';
 
@@ -22,10 +38,22 @@ export default function ProductionStatusPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabType>('unassigned');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedAnalysis, setSelectedAnalysis] = useState<ViralAnalysis | null>(null);
-  const [showDetailDrawer, setShowDetailDrawer] = useState(false);
   const [showTodayOnly, setShowTodayOnly] = useState(false);
   const [showShootingTodayOnly, setShowShootingTodayOnly] = useState(false);
+
+  // Selection hook for bulk actions
+  const {
+    selectedIds,
+    activeItemId,
+    toggle,
+    selectAll,
+    deselectAll,
+    setActiveItem,
+    isSelected,
+    isActive,
+    selectedCount,
+    hasSelection,
+  } = useSelection<ViralAnalysis>();
 
   // Fetch all approved analyses
   const { data: analyses = [], isLoading } = useQuery({
@@ -72,7 +100,6 @@ export default function ProductionStatusPage() {
 
       if (error) throw error;
 
-      // Group files by analysis_id
       const filesByAnalysis: Record<string, ProductionFile[]> = {};
       (data || []).forEach((file: any) => {
         if (!filesByAnalysis[file.analysis_id]) {
@@ -105,21 +132,77 @@ export default function ProductionStatusPage() {
     },
   });
 
-  // Mutation to start shooting (move to SHOOTING stage)
-  const startShootingMutation = useMutation({
-    mutationFn: async (analysisId: string) => {
+  // Mutation to update planned date (for shooting tab - doesn't change stage)
+  const updatePlannedDateMutation = useMutation({
+    mutationFn: async ({ analysisId, plannedDate }: { analysisId: string; plannedDate: string }) => {
       const { error } = await supabase
         .from('viral_analyses')
-        .update({ production_stage: ProductionStage.SHOOTING })
+        .update({ planned_date: plannedDate })
         .eq('id', analysisId);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
-      toast.success('Moved to Shooting stage');
+      toast.success('Shoot date updated successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message || 'Failed to start shooting');
+      toast.error(error.message || 'Failed to update shoot date');
+    },
+  });
+
+  // Mutation to set deadline
+  const setDeadlineMutation = useMutation({
+    mutationFn: async ({ analysisId, deadline }: { analysisId: string; deadline: string }) => {
+      const { error } = await supabase
+        .from('viral_analyses')
+        .update({ deadline })
+        .eq('id', analysisId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      toast.success('Deadline updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update deadline');
+    },
+  });
+
+  // Bulk mutation to change stage
+  const bulkChangeStageListMutation = useMutation({
+    mutationFn: async ({ ids, stage }: { ids: string[]; stage: string }) => {
+      const { error } = await supabase
+        .from('viral_analyses')
+        .update({ production_stage: stage })
+        .in('id', ids);
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      toast.success(`${variables.ids.length} items moved to ${variables.stage.replace(/_/g, ' ')}`);
+      deselectAll();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to change stage');
+    },
+  });
+
+  // Bulk mutation to change priority
+  const bulkChangePriorityMutation = useMutation({
+    mutationFn: async ({ ids, priority }: { ids: string[]; priority: string }) => {
+      const { error } = await supabase
+        .from('viral_analyses')
+        .update({ priority })
+        .in('id', ids);
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      toast.success(`Priority updated for ${variables.ids.length} items`);
+      deselectAll();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to change priority');
     },
   });
 
@@ -146,8 +229,6 @@ export default function ProductionStatusPage() {
 
   // Group by tabs
   const unassigned = filteredAnalyses.filter(a => !a.videographer && !a.editor && !a.posting_manager);
-
-  // Planning tab: PRE_PRODUCTION and PLANNED stages
   const planningAll = filteredAnalyses.filter(a =>
     a.production_stage === ProductionStage.PRE_PRODUCTION ||
     a.production_stage === ProductionStage.PLANNED
@@ -161,6 +242,7 @@ export default function ProductionStatusPage() {
   );
   const shootingToday = shootingAll.filter(a => isToday(a.planned_date));
   const shooting = showShootingTodayOnly ? shootingToday : shootingAll;
+
   const editing = filteredAnalyses.filter(a =>
     a.production_stage === ProductionStage.EDITING ||
     a.production_stage === ProductionStage.EDIT_REVIEW
@@ -171,18 +253,6 @@ export default function ProductionStatusPage() {
   );
   const posted = filteredAnalyses.filter(a => a.production_stage === ProductionStage.POSTED);
 
-  // Debug: Log production stages
-  const stageBreakdown = filteredAnalyses.reduce((acc: any, a) => {
-    const stage = a.production_stage || 'NOT_STARTED';
-    acc[stage] = (acc[stage] || 0) + 1;
-    return acc;
-  }, {});
-
-  console.log('Stage breakdown:', stageBreakdown);
-  console.log('Editing count:', editing.length);
-  console.log('Scripts in EDITING stage:', filteredAnalyses.filter(a => a.production_stage === 'EDITING').map(a => a.content_id));
-  console.log('Scripts in EDIT_REVIEW stage:', filteredAnalyses.filter(a => a.production_stage === 'EDIT_REVIEW').map(a => a.content_id));
-
   const tabs = [
     { id: 'unassigned' as TabType, label: 'Unassigned', count: unassigned.length, color: 'red' },
     { id: 'planning' as TabType, label: 'Planning', count: planningAll.length, todayCount: planningToday.length, color: 'cyan' },
@@ -192,7 +262,7 @@ export default function ProductionStatusPage() {
     { id: 'posted' as TabType, label: 'Posted', count: posted.length, color: 'emerald' },
   ];
 
-  const getCurrentData = () => {
+  const getCurrentData = (): ViralAnalysis[] => {
     switch (activeTab) {
       case 'unassigned': return unassigned;
       case 'planning': return planning;
@@ -203,6 +273,9 @@ export default function ProductionStatusPage() {
       default: return [];
     }
   };
+
+  const currentData = getCurrentData();
+  const activeAnalysis = currentData.find(a => a.id === activeItemId) || null;
 
   const getDaysInStage = (updatedAt: string) => {
     const days = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
@@ -271,43 +344,140 @@ export default function ProductionStatusPage() {
     }
   };
 
-  return (
-    <div className="flex-1 bg-gray-50 overflow-auto">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 md:py-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center">
-              <ChartBarIcon className="w-6 h-6 md:w-7 md:h-7 mr-2 md:mr-3 text-primary-600" />
-              Production Status
-            </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              {filteredAnalyses.length} project{filteredAnalyses.length !== 1 ? 's' : ''} in pipeline
-            </p>
+  // Handle row click - set as active (view in detail panel)
+  const handleRowClick = (project: ViralAnalysis) => {
+    setActiveItem(project.id);
+  };
+
+  // Handle checkbox click - toggle selection for bulk actions
+  const handleCheckboxClick = (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+    toggle(projectId);
+  };
+
+  // Clear selection when changing tabs
+  const handleTabChange = (tabId: TabType) => {
+    setActiveTab(tabId);
+    deselectAll();
+    setActiveItem(null);
+  };
+
+  // Bulk actions based on current tab
+  const getBulkActions = (): BulkAction[] => {
+    const selectedIdArray = Array.from(selectedIds);
+
+    const actions: BulkAction[] = [];
+
+    // Stage change actions based on current tab
+    if (activeTab === 'planning') {
+      actions.push({
+        id: 'start-shooting',
+        label: 'Start Shooting',
+        icon: <PlayIcon className="w-4 h-4" />,
+        variant: 'success',
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.SHOOTING }),
+      });
+    }
+
+    if (activeTab === 'shooting') {
+      actions.push({
+        id: 'move-to-editing',
+        label: 'Move to Editing',
+        variant: 'success',
+        icon: <ArrowPathIcon className="w-4 h-4" />,
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.EDITING }),
+      });
+    }
+
+    if (activeTab === 'editing') {
+      actions.push({
+        id: 'move-to-ready',
+        label: 'Mark Ready',
+        variant: 'success',
+        icon: <CheckCircleIcon className="w-4 h-4" />,
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.READY_TO_POST }),
+      });
+    }
+
+    if (activeTab === 'ready') {
+      actions.push({
+        id: 'mark-posted',
+        label: 'Mark Posted',
+        variant: 'success',
+        icon: <CheckCircleIcon className="w-4 h-4" />,
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.POSTED }),
+      });
+    }
+
+    // Priority actions (available on all tabs except posted)
+    if (activeTab !== 'posted') {
+      actions.push({
+        id: 'set-urgent',
+        label: 'Set Urgent',
+        icon: <FlagIcon className="w-4 h-4" />,
+        variant: 'danger',
+        onClick: () => bulkChangePriorityMutation.mutate({ ids: selectedIdArray, priority: Priority.URGENT }),
+      });
+      actions.push({
+        id: 'set-high',
+        label: 'Set High',
+        icon: <FlagIcon className="w-4 h-4" />,
+        variant: 'warning',
+        onClick: () => bulkChangePriorityMutation.mutate({ ids: selectedIdArray, priority: Priority.HIGH }),
+      });
+    }
+
+    return actions;
+  };
+
+  // Close detail panel when clicking outside
+  const handleClosePanel = () => {
+    setActiveItem(null);
+  };
+
+  // Master Panel Content
+  const masterContent = (
+    <div className="flex flex-col h-full">
+      {/* Header - clicking here closes the detail panel */}
+      <div
+        className="flex-shrink-0 bg-white border-b border-gray-200 px-4 py-4 cursor-default"
+        onClick={handleClosePanel}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 flex items-center">
+                <ChartBarIcon className="w-6 h-6 mr-2 text-primary-600" />
+                Production Status
+              </h1>
+              <p className="text-sm text-gray-600 mt-0.5">
+                {filteredAnalyses.length} project{filteredAnalyses.length !== 1 ? 's' : ''} in pipeline
+              </p>
+            </div>
           </div>
-          <div className="relative w-full md:w-96">
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
             <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by content ID, hook, team..."
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
             />
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-8">
-        <div className="flex items-center justify-between">
+      <div className="flex-shrink-0 bg-white border-b border-gray-200">
+        <div className="flex items-center justify-between px-2">
           <div className="flex overflow-x-auto hide-scrollbar">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`
-                  flex-shrink-0 px-4 md:px-6 py-3 md:py-4 text-sm font-medium border-b-2 transition whitespace-nowrap
+                  flex-shrink-0 px-3 py-3 text-sm font-medium border-b-2 transition whitespace-nowrap
                   ${activeTab === tab.id
                     ? 'border-primary-600 text-primary-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -315,312 +485,364 @@ export default function ProductionStatusPage() {
                 `}
               >
                 {tab.label}
-                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${
                   activeTab === tab.id ? `bg-${tab.color}-100 text-${tab.color}-800` : 'bg-gray-100 text-gray-600'
                 }`}>
                   {tab.count}
                 </span>
                 {(tab.id === 'planning' || tab.id === 'shooting') && tab.todayCount !== undefined && tab.todayCount > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800 font-bold">
-                    {tab.todayCount} today
+                  <span className="ml-1 px-1 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800 font-bold">
+                    {tab.todayCount}
                   </span>
                 )}
               </button>
             ))}
           </div>
 
-          {/* Planning tab controls */}
+          {/* Tab-specific filters */}
           {activeTab === 'planning' && (
-            <div className="flex items-center gap-3 ml-4">
-              <button
-                onClick={() => setShowTodayOnly(!showTodayOnly)}
-                className={`
-                  flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition
-                  ${showTodayOnly
-                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                    : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
-                  }
-                `}
-              >
-                <SunIcon className="w-4 h-4" />
-                Planned for Today
-                {planningToday.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-xs bg-amber-200 text-amber-900">
-                    {planningToday.length}
-                  </span>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowTodayOnly(!showTodayOnly)}
+              className={`
+                flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition mr-2
+                ${showTodayOnly
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
+                }
+              `}
+            >
+              <SunIcon className="w-3.5 h-3.5" />
+              Today
+            </button>
           )}
 
-          {/* Shooting tab controls */}
           {activeTab === 'shooting' && (
-            <div className="flex items-center gap-3 ml-4">
-              <button
-                onClick={() => setShowShootingTodayOnly(!showShootingTodayOnly)}
-                className={`
-                  flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition
-                  ${showShootingTodayOnly
-                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                    : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
-                  }
-                `}
-              >
-                <SunIcon className="w-4 h-4" />
-                Shooting Today
-                {shootingToday.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-xs bg-amber-200 text-amber-900">
-                    {shootingToday.length}
-                  </span>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowShootingTodayOnly(!showShootingTodayOnly)}
+              className={`
+                flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition mr-2
+                ${showShootingTodayOnly
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
+                }
+              `}
+            >
+              <SunIcon className="w-3.5 h-3.5" />
+              Today
+            </button>
           )}
         </div>
       </div>
 
-      {/* Content */}
-      <div className="p-4 md:p-8">
+      {/* Table Content */}
+      <div
+        className="flex-1 overflow-auto"
+        onClick={(e) => {
+          // Close detail panel when clicking on empty space (not on a row)
+          const target = e.target as HTMLElement;
+          if (target.tagName === 'DIV' && target.classList.contains('overflow-auto')) {
+            setActiveItem(null);
+          }
+        }}
+      >
         {isLoading ? (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
           </div>
-        ) : getCurrentData().length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
+        ) : currentData.length === 0 ? (
+          <div className="p-8 text-center" onClick={handleClosePanel}>
             <p className="text-gray-500">No projects in this stage</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Content ID
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[200px]">
-                      Hook/Title
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Stage
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Team
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Files
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Priority
-                    </th>
+          <>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th className="px-3 py-3 text-left w-10">
+                  <input
+                    type="checkbox"
+                    checked={selectedCount === currentData.length && currentData.length > 0}
+                    onChange={() => selectedCount === currentData.length ? deselectAll() : selectAll(currentData)}
+                    className="w-4 h-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500 cursor-pointer"
+                  />
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Content ID
+                </th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Ref
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[150px]">
+                  Hook
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Stage
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Team
+                </th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Files
+                </th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Priority
+                </th>
+                {activeTab === 'planning' && (
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                    Planned
+                  </th>
+                )}
+                {activeTab === 'shooting' && (
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                    Shoot
+                  </th>
+                )}
+                {activeTab !== 'planning' && activeTab !== 'shooting' && (
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                    Deadline
+                  </th>
+                )}
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Days
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {currentData.map((project) => {
+                const daysInStage = getDaysInStage(project.updated_at);
+                let fileStatus;
+
+                if (activeTab === 'shooting') {
+                  fileStatus = getFileStatus(project.id, 'raw-footage', project.deadline);
+                } else if (activeTab === 'editing') {
+                  fileStatus = getFileStatus(project.id, 'edited-video', project.deadline);
+                } else if (activeTab === 'ready') {
+                  fileStatus = getFileStatus(project.id, 'final-video', project.deadline);
+                }
+
+                const rowIsSelected = isSelected(project.id);
+                const rowIsActive = isActive(project.id);
+
+                return (
+                  <tr
+                    key={project.id}
+                    onClick={() => handleRowClick(project)}
+                    className={`
+                      cursor-pointer transition-colors
+                      ${rowIsActive ? 'bg-primary-50 ring-2 ring-inset ring-primary-500' : ''}
+                      ${rowIsSelected && !rowIsActive ? 'bg-blue-50' : ''}
+                      ${!rowIsSelected && !rowIsActive ? 'hover:bg-gray-50' : ''}
+                    `}
+                  >
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={rowIsSelected}
+                        onClick={(e) => handleCheckboxClick(e, project.id)}
+                        onChange={() => {}}
+                        className="w-4 h-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500 cursor-pointer"
+                      />
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-primary-600">
+                      {project.content_id || '-'}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-center">
+                      {project.reference_url ? (
+                        <a
+                          href={project.reference_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center justify-center p-1.5 text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded-lg transition"
+                          title={project.reference_url}
+                        >
+                          <LinkIcon className="w-4 h-4" />
+                        </a>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-sm text-gray-900">
+                      <div className="line-clamp-1 max-w-[180px]">
+                        {project.hook || 'No hook'}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
+                        {project.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600">
+                      <div className="space-y-0.5">
+                        {project.videographer && (
+                          <div><span className="font-medium">V:</span> {project.videographer.full_name?.split(' ')[0] || project.videographer.email?.split('@')[0]}</div>
+                        )}
+                        {project.editor && (
+                          <div><span className="font-medium">E:</span> {project.editor.full_name?.split(' ')[0] || project.editor.email?.split('@')[0]}</div>
+                        )}
+                        {!project.videographer && !project.editor && (
+                          <span className="text-red-600 font-medium">Unassigned</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-center">
+                      {fileStatus ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <fileStatus.icon className={`w-4 h-4 ${fileStatus.color}`} />
+                          {fileStatus.file && (
+                            <div className="flex gap-0.5">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleViewFile(fileStatus.file!.file_url); }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="View"
+                              >
+                                <EyeIcon className="w-3.5 h-3.5 text-gray-600" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDownloadFile(fileStatus.file!.file_url, fileStatus.file!.file_name); }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Download"
+                              >
+                                <ArrowDownTrayIcon className="w-3.5 h-3.5 text-gray-600" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
+                        {project.priority || 'NORMAL'}
+                      </span>
+                    </td>
                     {activeTab === 'planning' && (
-                      <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                        Planned Date
-                      </th>
+                      <td className="px-3 py-3 whitespace-nowrap text-xs text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="date"
+                            value={project.planned_date ? new Date(project.planned_date).toISOString().split('T')[0] : ''}
+                            min={new Date().toISOString().split('T')[0]}
+                            className={`px-1.5 py-0.5 text-xs border rounded focus:ring-2 focus:ring-primary-500 w-28 cursor-pointer ${
+                              project.planned_date
+                                ? isToday(project.planned_date)
+                                  ? 'border-amber-300 bg-amber-50 text-amber-700 font-semibold'
+                                  : 'border-gray-300 text-gray-600'
+                                : 'border-gray-300'
+                            }`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setPlannedDateMutation.mutate({ analysisId: project.id, plannedDate: e.target.value });
+                              }
+                            }}
+                          />
+                          {project.planned_date && isToday(project.planned_date) && (
+                            <span className="px-1 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Today</span>
+                          )}
+                        </div>
+                      </td>
                     )}
                     {activeTab === 'shooting' && (
-                      <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                        Shoot Date
-                      </th>
+                      <td className="px-3 py-3 whitespace-nowrap text-xs text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="date"
+                            value={project.planned_date ? new Date(project.planned_date).toISOString().split('T')[0] : ''}
+                            min={new Date().toISOString().split('T')[0]}
+                            className={`px-1.5 py-0.5 text-xs border rounded focus:ring-2 focus:ring-primary-500 w-28 cursor-pointer ${
+                              project.planned_date
+                                ? isToday(project.planned_date)
+                                  ? 'border-amber-300 bg-amber-50 text-amber-700 font-semibold'
+                                  : 'border-gray-300 text-gray-600'
+                                : 'border-gray-300'
+                            }`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                updatePlannedDateMutation.mutate({ analysisId: project.id, plannedDate: e.target.value });
+                              }
+                            }}
+                          />
+                          {project.planned_date && isToday(project.planned_date) && (
+                            <span className="px-1 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Today</span>
+                          )}
+                        </div>
+                      </td>
                     )}
                     {activeTab !== 'planning' && activeTab !== 'shooting' && (
-                      <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                        Deadline
-                      </th>
+                      <td className="px-3 py-3 whitespace-nowrap text-xs text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="date"
+                            value={project.deadline ? new Date(project.deadline).toISOString().split('T')[0] : ''}
+                            min={new Date().toISOString().split('T')[0]}
+                            className={`px-1.5 py-0.5 text-xs border rounded focus:ring-2 focus:ring-primary-500 w-28 cursor-pointer ${
+                              project.deadline
+                                ? new Date(project.deadline) < new Date()
+                                  ? 'border-red-300 bg-red-50 text-red-600 font-semibold'
+                                  : 'border-gray-300 text-gray-600'
+                                : 'border-gray-300'
+                            }`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setDeadlineMutation.mutate({ analysisId: project.id, deadline: e.target.value });
+                              }
+                            }}
+                          />
+                        </div>
+                      </td>
                     )}
-                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Days
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      Actions
-                    </th>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-center">
+                      <span className={`${daysInStage > 7 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
+                        {daysInStage}d
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {getCurrentData().map((project) => {
-                    const daysInStage = getDaysInStage(project.updated_at);
-                    let fileStatus;
-
-                    if (activeTab === 'shooting') {
-                      fileStatus = getFileStatus(project.id, 'raw-footage', project.deadline);
-                    } else if (activeTab === 'editing') {
-                      fileStatus = getFileStatus(project.id, 'edited-video', project.deadline);
-                    } else if (activeTab === 'ready') {
-                      fileStatus = getFileStatus(project.id, 'final-video', project.deadline);
-                    }
-
-                    return (
-                      <tr key={project.id} className="hover:bg-gray-50">
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
-                          {project.content_id || '-'}
-                        </td>
-                        <td className="px-3 md:px-6 py-4 text-sm text-gray-900">
-                          <div className="line-clamp-2 max-w-xs">
-                            {project.hook || 'No hook provided'}
-                          </div>
-                        </td>
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(project.production_stage)}`}>
-                            {project.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
-                          </span>
-                        </td>
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs text-gray-600">
-                          <div className="space-y-1">
-                            {project.videographer && (
-                              <div className="flex items-center gap-1">
-                                <span className="font-medium">V:</span>
-                                <span>{project.videographer.full_name || project.videographer.email}</span>
-                              </div>
-                            )}
-                            {project.editor && (
-                              <div className="flex items-center gap-1">
-                                <span className="font-medium">E:</span>
-                                <span>{project.editor.full_name || project.editor.email}</span>
-                              </div>
-                            )}
-                            {project.posting_manager && (
-                              <div className="flex items-center gap-1">
-                                <span className="font-medium">PM:</span>
-                                <span>{project.posting_manager.full_name || project.posting_manager.email}</span>
-                              </div>
-                            )}
-                            {!project.videographer && !project.editor && !project.posting_manager && (
-                              <span className="text-red-600 font-medium">Unassigned</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
-                          {fileStatus ? (
-                            <div className="flex items-center justify-center gap-2">
-                              <fileStatus.icon className={`w-5 h-5 ${fileStatus.color}`} />
-                              {fileStatus.file && (
-                                <div className="flex gap-1">
-                                  <button
-                                    onClick={() => handleViewFile(fileStatus.file!.file_url)}
-                                    className="p-1 hover:bg-gray-100 rounded"
-                                    title="View file"
-                                  >
-                                    <EyeIcon className="w-4 h-4 text-gray-600" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDownloadFile(fileStatus.file!.file_url, fileStatus.file!.file_name)}
-                                    className="p-1 hover:bg-gray-100 rounded"
-                                    title="Download file"
-                                  >
-                                    <ArrowDownTrayIcon className="w-4 h-4 text-gray-600" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
-                            {project.priority || 'NORMAL'}
-                          </span>
-                        </td>
-                        {activeTab === 'planning' && (
-                          <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
-                            {project.planned_date ? (
-                              <div className={`flex items-center justify-center gap-1 ${isToday(project.planned_date) ? 'text-amber-700 font-semibold' : 'text-gray-600'}`}>
-                                <CalendarIcon className="w-4 h-4" />
-                                {new Date(project.planned_date).toLocaleDateString()}
-                                {isToday(project.planned_date) && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Today</span>
-                                )}
-                              </div>
-                            ) : (
-                              <input
-                                type="date"
-                                min={new Date().toISOString().split('T')[0]}
-                                className="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-primary-500"
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    setPlannedDateMutation.mutate({ analysisId: project.id, plannedDate: e.target.value });
-                                  }
-                                }}
-                              />
-                            )}
-                          </td>
-                        )}
-                        {activeTab === 'shooting' && (
-                          <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
-                            {project.planned_date ? (
-                              <div className={`flex items-center justify-center gap-1 ${isToday(project.planned_date) ? 'text-amber-700 font-semibold' : 'text-gray-600'}`}>
-                                <CalendarIcon className="w-4 h-4" />
-                                {new Date(project.planned_date).toLocaleDateString()}
-                                {isToday(project.planned_date) && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Today</span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400">Not set</span>
-                            )}
-                          </td>
-                        )}
-                        {activeTab !== 'planning' && activeTab !== 'shooting' && (
-                          <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
-                            {project.deadline ? (
-                              <div className={`${new Date(project.deadline) < new Date() ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
-                                {new Date(project.deadline).toLocaleDateString()}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400">-</span>
-                            )}
-                          </td>
-                        )}
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-center">
-                          <span className={`${daysInStage > 7 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
-                            {daysInStage}d
-                          </span>
-                        </td>
-                        <td className="px-3 md:px-6 py-4 whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            {/* Quick Start Shooting button for PLANNED items */}
-                            {activeTab === 'planning' && project.production_stage === ProductionStage.PLANNED && (
-                              <button
-                                onClick={() => startShootingMutation.mutate(project.id)}
-                                disabled={startShootingMutation.isPending}
-                                className="inline-flex items-center px-2.5 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-                                title="Start Shooting"
-                              >
-                                <PlayIcon className="w-3.5 h-3.5 mr-1" />
-                                Start
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSelectedAnalysis(project);
-                                setShowDetailDrawer(true);
-                              }}
-                              className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
-                              title="View details"
-                            >
-                              View <ChevronRightIcon className="w-4 h-4 ml-1" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                );
+              })}
+            </tbody>
+          </table>
+          {/* Click area below table to close panel */}
+          <div
+            className="h-16 w-full cursor-default"
+            onClick={handleClosePanel}
+          />
+          </>
         )}
       </div>
-
-      {/* Production Detail Drawer */}
-      <ProductionDetailDrawer
-        analysis={selectedAnalysis}
-        isOpen={showDetailDrawer}
-        onClose={() => {
-          setShowDetailDrawer(false);
-          setSelectedAnalysis(null);
-        }}
-      />
     </div>
+  );
+
+  // Detail Panel Content
+  const detailContent = activeAnalysis ? (
+    <ProductionDetailPanel
+      analysis={activeAnalysis}
+      onClose={() => setActiveItem(null)}
+    />
+  ) : null;
+
+  // Bulk Action Toolbar
+  const bulkToolbar = hasSelection ? (
+    <BulkActionToolbar
+      selectedCount={selectedCount}
+      totalCount={currentData.length}
+      onSelectAll={() => selectAll(currentData)}
+      onDeselectAll={deselectAll}
+      actions={getBulkActions()}
+      allSelected={selectedCount === currentData.length}
+    />
+  ) : null;
+
+  return (
+    <SplitViewLayout
+      masterContent={masterContent}
+      detailContent={detailContent}
+      hasActiveItem={!!activeAnalysis}
+      onCloseDetail={() => setActiveItem(null)}
+      bulkActionToolbar={bulkToolbar}
+    />
   );
 }

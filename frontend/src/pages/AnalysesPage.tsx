@@ -1,17 +1,30 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { analysesService } from '@/services/analysesService';
 import { adminService } from '@/services/adminService';
 import { profileService } from '@/services/profileService';
 import { contentConfigService } from '@/services/contentConfigService';
-import { PlusIcon, PencilIcon, LinkIcon, EyeIcon, StarIcon } from '@heroicons/react/24/outline';
+import {
+  PlusIcon,
+  PencilIcon,
+  LinkIcon,
+  EyeIcon,
+  StarIcon,
+  MagnifyingGlassIcon,
+  DocumentTextIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  ClockIcon,
+} from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import ReviewScoreInput from '@/components/ReviewScoreInput';
 import { MultiStepAnalysisWizard } from '@/components/wizard';
 import type { ViralAnalysis, AnalysisFormData, ReviewAnalysisData } from '@/types';
 import { UserRole } from '@/types';
+
+type TabType = 'pending' | 'approved' | 'rejected';
 
 // Helper function to create default form data
 const createDefaultFormData = (): AnalysisFormData => ({
@@ -109,6 +122,10 @@ export default function AnalysesPage() {
     viralPotential: 5,
     replicationClarity: 5,
   });
+
+  // New state for table view
+  const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Check if current user is admin
   const { data: profile } = useQuery({
@@ -222,6 +239,10 @@ export default function AnalysesPage() {
         planningDate: analysis.planning_date || '',
         additionalRequirements: analysis.additional_requirements || '',
       });
+    } else {
+      // Reset form for new entry
+      setEditingAnalysis(null);
+      setFormData(createDefaultFormData());
     }
     setIsModalOpen(true);
   };
@@ -304,19 +325,67 @@ export default function AnalysesPage() {
     }
   };
 
+  // Filter and search analyses
+  const filteredAnalyses = useMemo(() => {
+    if (!analyses) return [];
+
+    let filtered = analyses.filter((a: ViralAnalysis) => {
+      const statusMatch = activeTab === 'pending'
+        ? a.status === 'PENDING'
+        : activeTab === 'approved'
+        ? a.status === 'APPROVED'
+        : a.status === 'REJECTED';
+      return statusMatch;
+    });
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((a: ViralAnalysis) =>
+        a.hook?.toLowerCase().includes(query) ||
+        a.id?.toLowerCase().includes(query) ||
+        a.reference_url?.toLowerCase().includes(query) ||
+        a.target_emotion?.toLowerCase().includes(query) ||
+        a.platform?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [analyses, activeTab, searchQuery]);
+
+  // Count by status
+  const counts = useMemo(() => {
+    if (!analyses) return { pending: 0, approved: 0, rejected: 0 };
+    return {
+      pending: analyses.filter((a: ViralAnalysis) => a.status === 'PENDING').length,
+      approved: analyses.filter((a: ViralAnalysis) => a.status === 'APPROVED').length,
+      rejected: analyses.filter((a: ViralAnalysis) => a.status === 'REJECTED').length,
+    };
+  }, [analyses]);
+
+  // Tab config
+  const tabs: { id: TabType; label: string; icon: React.ReactNode; count: number }[] = [
+    { id: 'pending', label: 'Pending', icon: <ClockIcon className="w-4 h-4" />, count: counts.pending },
+    { id: 'approved', label: 'Approved', icon: <CheckCircleIcon className="w-4 h-4" />, count: counts.approved },
+    { id: 'rejected', label: 'Rejected', icon: <XCircleIcon className="w-4 h-4" />, count: counts.rejected },
+  ];
+
   return (
     <div className="pb-24 md:pb-8">
-      {/* Mobile-First Header - Stacked on mobile, side-by-side on desktop */}
-      <div className="mb-6 md:mb-8">
+      {/* Header */}
+      <div className="mb-6">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Your Videos</h1>
-            <p className="mt-1 md:mt-2 text-sm md:text-base text-gray-600">Analyze viral content and create strategies</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <DocumentTextIcon className="w-7 h-7 text-primary-600" />
+              My Scripts
+            </h1>
+            <p className="mt-1 text-sm text-gray-600">
+              {analyses?.length || 0} total scripts
+            </p>
           </div>
-          {/* Desktop Button */}
           <button
             onClick={() => openModal()}
-            className="hidden md:inline-flex items-center px-6 py-3 border border-transparent shadow-sm text-base font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 transition min-h-[48px]"
+            className="inline-flex items-center px-5 py-2.5 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 transition"
           >
             <PlusIcon className="h-5 w-5 mr-2" />
             Add New Video
@@ -324,115 +393,224 @@ export default function AnalysesPage() {
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-        </div>
-      ) : analyses && analyses.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {analyses.map((analysis: ViralAnalysis) => (
-            <div key={analysis.id} className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 p-4 md:p-6 border-l-4 border-transparent hover:border-primary-500">
-              <div className="flex justify-between items-start mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">
-                  {analysis.hook || 'Untitled Analysis'}
-                </h3>
-                <div className="flex flex-col items-end space-y-1">
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(analysis.status)}`}>
-                    {analysis.status}
-                  </span>
-                  {analysis.status === 'REJECTED' && analysis.rejection_count !== undefined && analysis.rejection_count > 0 && (
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                      analysis.rejection_count >= 4
-                        ? 'bg-red-100 text-red-800 border border-red-300'
-                        : 'bg-orange-100 text-orange-800'
-                    }`}>
-                      🔄 Rejected {analysis.rejection_count}x
-                    </span>
-                  )}
-                  {analysis.is_dissolved && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-600 text-white">
-                      ⚠️ Dissolved
-                    </span>
-                  )}
-                </div>
-              </div>
-              {analysis.reference_url && (
-                <a
-                  href={analysis.reference_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center text-sm text-primary-600 hover:text-primary-700 mb-3"
-                >
-                  <LinkIcon className="w-4 h-4 mr-1" />
-                  View Reference
-                </a>
-              )}
-              <p className="text-sm text-gray-600 line-clamp-3 mb-4">
-                {analysis.why_viral || analysis.how_to_replicate || 'No description'}
-              </p>
-              <div className="space-y-2 mb-4">
-                {analysis.target_emotion && (
-                  <div className="flex items-center text-sm text-gray-500">
-                    <span className="font-medium mr-2">Emotion:</span>
-                    {analysis.target_emotion}
-                  </div>
-                )}
-                {analysis.expected_outcome && (
-                  <div className="flex items-center text-sm text-gray-500">
-                    <span className="font-medium mr-2">Outcome:</span>
-                    {analysis.expected_outcome}
-                  </div>
-                )}
-              </div>
-              {/* Touch-Friendly Action Buttons */}
-              <div className="flex gap-2 md:gap-3">
-                <button
-                  onClick={() => openViewModal(analysis)}
-                  className="flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] border border-gray-300 shadow-sm text-sm md:text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition"
-                >
-                  <EyeIcon className="h-5 w-5 mr-2" />
-                  View
-                </button>
-                {(analysis.status === 'PENDING' || analysis.status === 'REJECTED') && !analysis.is_dissolved && (
-                  <button
-                    onClick={() => openModal(analysis)}
-                    className={`flex-1 inline-flex justify-center items-center px-4 py-3 min-h-[48px] border shadow-sm text-sm md:text-base font-medium rounded-lg transition ${
-                      analysis.status === 'REJECTED'
-                        ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100 active:bg-red-200'
-                        : 'border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100 active:bg-primary-200'
-                    }`}
-                  >
-                    <PencilIcon className="h-5 w-5 mr-2" />
-                    <span className="hidden sm:inline">{analysis.status === 'REJECTED' ? 'Revise & Resubmit' : 'Edit'}</span>
-                    <span className="sm:hidden">Edit</span>
-                  </button>
-                )}
-              </div>
-            </div>
+      {/* Tabs */}
+      <div className="bg-white rounded-t-xl border border-gray-200 border-b-0">
+        <div className="flex">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 md:flex-none px-4 md:px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
+                activeTab === tab.id
+                  ? 'border-primary-600 text-primary-600 bg-primary-50/50'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              <span
+                className={`px-2 py-0.5 text-xs rounded-full ${
+                  activeTab === tab.id
+                    ? 'bg-primary-100 text-primary-700'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
           ))}
         </div>
-      ) : (
-        <div className="bg-white rounded-xl shadow-md p-8 md:p-12 text-center">
-          <div className="max-w-sm mx-auto">
-            {/* Friendly Icon */}
-            <div className="mx-auto w-16 h-16 md:w-20 md:h-20 bg-primary-50 rounded-full flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 md:w-10 md:h-10 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <h3 className="text-lg md:text-xl font-semibold text-gray-900 mb-2">No videos yet</h3>
-            <p className="text-sm md:text-base text-gray-600 mb-6">Start by analyzing your first viral video! We'll help you understand what makes it successful.</p>
-            {/* Mobile CTA */}
-            <button
-              onClick={() => openModal()}
-              className="md:hidden inline-flex items-center justify-center px-6 py-3 min-h-[56px] w-full border border-transparent shadow-lg text-base font-semibold rounded-lg text-white bg-primary-600 hover:bg-primary-700 active:bg-primary-800 transition"
-            >
-              <PlusIcon className="h-6 w-6 mr-2" />
-              Add Your First Video
-            </button>
-          </div>
+      </div>
+
+      {/* Search Bar */}
+      <div className="bg-white border-x border-gray-200 px-4 py-3">
+        <div className="relative">
+          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by hook, content ID, platform, emotion..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          />
         </div>
-      )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-b-xl border border-gray-200 border-t-0 overflow-hidden">
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
+          </div>
+        ) : filteredAnalyses.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Hook
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">
+                    Platform
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden lg:table-cell">
+                    Emotion
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden lg:table-cell">
+                    Reference
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredAnalyses.map((analysis: ViralAnalysis) => (
+                  <tr
+                    key={analysis.id}
+                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => openViewModal(analysis)}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate max-w-[300px]">
+                            {analysis.hook || 'Untitled'}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate max-w-[300px] mt-0.5">
+                            ID: {analysis.id.slice(0, 8)}...
+                          </p>
+                          {/* Mobile-only info */}
+                          <div className="md:hidden mt-1 flex items-center gap-2 text-xs text-gray-500">
+                            {analysis.platform && (
+                              <span className="px-1.5 py-0.5 bg-gray-100 rounded">{analysis.platform}</span>
+                            )}
+                            <span>{new Date(analysis.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        {/* Status badges for rejected tab */}
+                        {activeTab === 'rejected' && (
+                          <div className="flex flex-col items-end gap-1">
+                            {analysis.rejection_count !== undefined && analysis.rejection_count > 0 && (
+                              <span
+                                className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                                  analysis.rejection_count >= 4
+                                    ? 'bg-red-100 text-red-800 border border-red-300'
+                                    : 'bg-orange-100 text-orange-800'
+                                }`}
+                              >
+                                {analysis.rejection_count}x
+                              </span>
+                            )}
+                            {analysis.is_dissolved && (
+                              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-600 text-white">
+                                Dissolved
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="text-sm text-gray-700">
+                        {analysis.platform || '-'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className="text-sm text-gray-700">
+                        {analysis.target_emotion || '-'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {analysis.reference_url ? (
+                        <a
+                          href={analysis.reference_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center text-sm text-primary-600 hover:text-primary-700"
+                        >
+                          <LinkIcon className="w-4 h-4 mr-1" />
+                          Link
+                        </a>
+                      ) : (
+                        <span className="text-sm text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="text-sm text-gray-500">
+                        {new Date(analysis.created_at).toLocaleDateString()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => openViewModal(analysis)}
+                          className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition"
+                          title="View"
+                        >
+                          <EyeIcon className="w-5 h-5" />
+                        </button>
+                        {(analysis.status === 'PENDING' || analysis.status === 'REJECTED') && !analysis.is_dissolved && (
+                          <button
+                            onClick={() => openModal(analysis)}
+                            className={`p-2 rounded-lg transition ${
+                              analysis.status === 'REJECTED'
+                                ? 'text-red-500 hover:text-red-600 hover:bg-red-50'
+                                : 'text-primary-500 hover:text-primary-600 hover:bg-primary-50'
+                            }`}
+                            title={analysis.status === 'REJECTED' ? 'Revise & Resubmit' : 'Edit'}
+                          >
+                            <PencilIcon className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-12 px-4">
+            <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              {activeTab === 'pending' && <ClockIcon className="w-8 h-8 text-gray-400" />}
+              {activeTab === 'approved' && <CheckCircleIcon className="w-8 h-8 text-gray-400" />}
+              {activeTab === 'rejected' && <XCircleIcon className="w-8 h-8 text-gray-400" />}
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-1">
+              {searchQuery
+                ? 'No scripts found'
+                : activeTab === 'pending'
+                ? 'No pending scripts'
+                : activeTab === 'approved'
+                ? 'No approved scripts yet'
+                : 'No rejected scripts'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              {searchQuery
+                ? 'Try a different search term'
+                : activeTab === 'pending'
+                ? 'Submit a new script to get started'
+                : activeTab === 'approved'
+                ? 'Your approved scripts will appear here'
+                : 'Rejected scripts will appear here for revision'}
+            </p>
+            {activeTab === 'pending' && !searchQuery && (
+              <button
+                onClick={() => openModal()}
+                className="inline-flex items-center px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition"
+              >
+                <PlusIcon className="w-5 h-5 mr-2" />
+                Add New Video
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Fixed Bottom Action Button (Mobile Only) */}
       {analyses && analyses.length > 0 && (
@@ -481,84 +659,152 @@ export default function AnalysesPage() {
                 </div>
 
                 <div className="space-y-6">
-                  {/* Reference URL */}
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">Reference Link</h3>
-                    {viewingAnalysis.reference_url ? (
-                      <a
-                        href={viewingAnalysis.reference_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center text-primary-600 hover:text-primary-700"
-                      >
-                        <LinkIcon className="w-4 h-4 mr-2" />
-                        {viewingAnalysis.reference_url}
-                      </a>
-                    ) : (
-                      <p className="text-gray-500 text-sm">No reference URL provided</p>
+                  {/* LEVEL 1: Basic Info Section */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
+                    <h3 className="text-base font-semibold text-gray-900 mb-4">Basic Information</h3>
+
+                    {/* Reference URL */}
+                    <div className="mb-4">
+                      <span className="text-xs font-medium text-gray-500 uppercase">Reference Link</span>
+                      {viewingAnalysis.reference_url ? (
+                        <a
+                          href={viewingAnalysis.reference_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center text-primary-600 hover:text-primary-700 mt-1"
+                        >
+                          <LinkIcon className="w-4 h-4 mr-2 flex-shrink-0" />
+                          <span className="truncate">{viewingAnalysis.reference_url}</span>
+                        </a>
+                      ) : (
+                        <p className="text-gray-500 text-sm mt-1">Not provided</p>
+                      )}
+                    </div>
+
+                    {/* Grid of basic info */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Shoot Type</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.shoot_type || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Creator</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.creator_name || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Works on Mute</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.works_without_audio || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Replication</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.replication_strength || '-'}/10</p>
+                      </div>
+                    </div>
+
+                    {/* Characters Involved */}
+                    {viewingAnalysis.characters_involved && (
+                      <div className="mt-3 bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Who's in the Video</span>
+                        <p className="text-sm text-gray-900 mt-1">{viewingAnalysis.characters_involved}</p>
+                      </div>
                     )}
                   </div>
 
-                  {/* Hook */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Hook (First 6 Seconds)</h3>
-                    {viewingAnalysis.hook && (
-                      <p className="text-gray-800 mb-3 whitespace-pre-wrap">{viewingAnalysis.hook}</p>
+                  {/* Hook Section */}
+                  <div className="bg-orange-50 p-4 rounded-lg border border-orange-100">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-lg">🔥</span>
+                      <h3 className="text-base font-semibold text-gray-900">The Hook</h3>
+                    </div>
+
+                    {viewingAnalysis.unusual_element && (
+                      <div className="mb-2">
+                        <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded-full">
+                          {viewingAnalysis.unusual_element}
+                        </span>
+                      </div>
                     )}
+
+                    {viewingAnalysis.hook ? (
+                      <p className="text-gray-800 font-medium">{viewingAnalysis.hook}</p>
+                    ) : (
+                      <p className="text-gray-500 text-sm">No hook text provided</p>
+                    )}
+
                     {viewingAnalysis.hook_voice_note_url && (
-                      <audio controls className="w-full mt-2">
+                      <audio controls className="w-full mt-3">
                         <source src={viewingAnalysis.hook_voice_note_url} type="audio/webm" />
                         Your browser does not support audio playback.
                       </audio>
                     )}
-                    {!viewingAnalysis.hook && !viewingAnalysis.hook_voice_note_url && (
-                      <p className="text-gray-500 text-sm">No hook provided</p>
-                    )}
                   </div>
 
-                  {/* Why Viral */}
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Why Did It Go Viral?</h3>
-                    {viewingAnalysis.why_viral && (
-                      <p className="text-gray-800 mb-3 whitespace-pre-wrap">{viewingAnalysis.why_viral}</p>
-                    )}
-                    {viewingAnalysis.why_viral_voice_note_url && (
-                      <audio controls className="w-full mt-2">
-                        <source src={viewingAnalysis.why_viral_voice_note_url} type="audio/webm" />
-                        Your browser does not support audio playback.
-                      </audio>
-                    )}
-                    {!viewingAnalysis.why_viral && !viewingAnalysis.why_viral_voice_note_url && (
-                      <p className="text-gray-500 text-sm">No viral analysis provided</p>
-                    )}
-                  </div>
+                  {/* LEVEL 2: Advanced Analysis Section */}
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-100">
+                    <h3 className="text-base font-semibold text-gray-900 mb-4">Advanced Analysis</h3>
 
-                  {/* How to Replicate */}
-                  <div className="bg-green-50 p-4 rounded-lg">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">How to Replicate for Our Brand</h3>
-                    {viewingAnalysis.how_to_replicate && (
-                      <p className="text-gray-800 mb-3 whitespace-pre-wrap">{viewingAnalysis.how_to_replicate}</p>
+                    {/* Body Reactions */}
+                    {viewingAnalysis.body_reactions && viewingAnalysis.body_reactions.length > 0 && (
+                      <div className="mb-4">
+                        <span className="text-xs font-medium text-gray-500 uppercase block mb-2">Body Reactions (First 6 sec)</span>
+                        <div className="flex flex-wrap gap-2">
+                          {viewingAnalysis.body_reactions.map((reaction: string, idx: number) => (
+                            <span key={idx} className="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
+                              {reaction}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     )}
-                    {viewingAnalysis.how_to_replicate_voice_note_url && (
-                      <audio controls className="w-full mt-2">
-                        <source src={viewingAnalysis.how_to_replicate_voice_note_url} type="audio/webm" />
-                        Your browser does not support audio playback.
-                      </audio>
-                    )}
-                    {!viewingAnalysis.how_to_replicate && !viewingAnalysis.how_to_replicate_voice_note_url && (
-                      <p className="text-gray-500 text-sm">No replication strategy provided</p>
-                    )}
-                  </div>
 
-                  {/* Target Emotion & Expected Outcome */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-purple-50 p-4 rounded-lg">
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Target Emotion</h3>
-                      <p className="text-gray-800">{viewingAnalysis.target_emotion || 'Not specified'}</p>
+                    {/* Emotion & Beliefs Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Emotion (First 6 sec)</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.emotion_first_6_sec || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Challenged Belief</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.challenged_belief || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">"If he can, why can't you?"</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.if_he_can_why_cant_you || '-'}</p>
+                      </div>
                     </div>
-                    <div className="bg-orange-50 p-4 rounded-lg">
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Expected Outcome</h3>
-                      <p className="text-gray-800">{viewingAnalysis.expected_outcome || 'Not specified'}</p>
+
+                    {/* Emotional Identity Impact */}
+                    {viewingAnalysis.emotional_identity_impact && viewingAnalysis.emotional_identity_impact.length > 0 && (
+                      <div className="mb-4">
+                        <span className="text-xs font-medium text-gray-500 uppercase block mb-2">Emotional Identity Impact</span>
+                        <div className="flex flex-wrap gap-2">
+                          {viewingAnalysis.emotional_identity_impact.map((impact: string, idx: number) => (
+                            <span key={idx} className="px-2 py-1 bg-pink-100 text-pink-800 text-xs font-medium rounded-full">
+                              {impact}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Engagement Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Feel Like Commenting</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.feel_like_commenting || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Read Comments</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.read_comments || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Shares</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.sharing_number ?? '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase block">Video Action</span>
+                        <p className="text-sm font-medium text-gray-900 mt-1">{viewingAnalysis.video_action || '-'}</p>
+                      </div>
                     </div>
                   </div>
 
