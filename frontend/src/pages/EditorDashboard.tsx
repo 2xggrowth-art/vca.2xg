@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { assignmentService } from '@/services/assignmentService';
 import { productionFilesService } from '@/services/productionFilesService';
-import { FilmIcon, CheckCircleIcon, PlayCircleIcon, EyeIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
-import { useState } from 'react';
+import { FilmIcon, CheckCircleIcon, PlayCircleIcon, EyeIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, ArrowDownTrayIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon } from '@heroicons/react/24/outline';
+import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import type { ViralAnalysis, UpdateProductionStageData, ProductionFile } from '@/types';
 import { ProductionStage, FileType } from '@/types';
@@ -17,6 +17,12 @@ export default function EditorDashboard() {
 
   // File upload state
   const [showFileForm, setShowFileForm] = useState(false);
+
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStage, setFilterStage] = useState<string>('');
+  const [filterPriority, setFilterPriority] = useState<string>('');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Fetch assigned analyses
   const { data: assignmentsData, isLoading } = useQuery({
@@ -180,6 +186,33 @@ export default function EditorDashboard() {
   //   ProductionStage.EDIT_REVIEW, // Submit for admin review
   // ];
 
+  // Filtered analyses based on search and filters
+  const filteredAnalyses = useMemo(() => {
+    return analyses.filter(analysis => {
+      // Search by project ID (content_id) or hook
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesContentId = analysis.content_id?.toLowerCase().includes(query);
+        const matchesHook = analysis.hook?.toLowerCase().includes(query);
+        if (!matchesContentId && !matchesHook) return false;
+      }
+      // Filter by stage
+      if (filterStage && analysis.production_stage !== filterStage) return false;
+      // Filter by priority
+      if (filterPriority && analysis.priority !== filterPriority) return false;
+      return true;
+    });
+  }, [analyses, searchQuery, filterStage, filterPriority]);
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterStage('');
+    setFilterPriority('');
+  };
+
+  const hasActiveFilters = searchQuery || filterStage || filterPriority;
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -244,84 +277,164 @@ export default function EditorDashboard() {
         </div>
       </div>
 
-      {/* Assigned Projects */}
+      {/* Assigned Projects - Notion-style compact table */}
       <div className="bg-white rounded-lg shadow">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">My Assigned Projects</h2>
+        <div className="px-4 py-3 border-b border-gray-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h2 className="text-base font-semibold text-gray-900">My Assigned Projects</h2>
+
+            <div className="flex items-center gap-2">
+              {/* Search Input */}
+              <div className="relative flex-1 sm:flex-none">
+                <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by ID or hook..."
+                  className="w-full sm:w-48 pl-8 pr-8 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <XMarkIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Toggle */}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all border ${
+                  showFilters || filterStage || filterPriority
+                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                    : 'text-gray-600 hover:text-gray-900 border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <FunnelIcon className="w-4 h-4" />
+                {(filterStage || filterPriority) && (
+                  <span className="w-4 h-4 bg-purple-600 text-white rounded-full text-xs flex items-center justify-center">
+                    {(filterStage ? 1 : 0) + (filterPriority ? 1 : 0)}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
+              <select
+                value={filterStage}
+                onChange={(e) => setFilterStage(e.target.value)}
+                className="px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              >
+                <option value="">All Stages</option>
+                <option value={ProductionStage.PRE_PRODUCTION}>Pre Production</option>
+                <option value={ProductionStage.PLANNED}>Planned</option>
+                <option value={ProductionStage.SHOOTING}>Shooting</option>
+                <option value={ProductionStage.SHOOT_REVIEW}>Shoot Review</option>
+                <option value={ProductionStage.EDITING}>Editing</option>
+                <option value={ProductionStage.EDIT_REVIEW}>Edit Review</option>
+                <option value={ProductionStage.FINAL_REVIEW}>Final Review</option>
+              </select>
+
+              <select
+                value={filterPriority}
+                onChange={(e) => setFilterPriority(e.target.value)}
+                className="px-2.5 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              >
+                <option value="">All Priorities</option>
+                <option value="URGENT">Urgent</option>
+                <option value="HIGH">High</option>
+                <option value="NORMAL">Normal</option>
+                <option value="LOW">Low</option>
+              </select>
+
+              {hasActiveFilters && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                >
+                  <XMarkIcon className="w-3.5 h-3.5" />
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Compact Table */}
         <div className="overflow-x-auto">
           {isLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+            <div className="flex justify-center items-center h-48">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
             </div>
-          ) : analyses && analyses.length > 0 ? (
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Project
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Priority
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stage
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Deadline
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Team
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+          ) : filteredAnalyses.length > 0 ? (
+            <table className="min-w-full">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Deadline</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Team</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"></th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {analyses.map((analysis) => (
-                  <tr key={analysis.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
+              <tbody>
+                {filteredAnalyses.map((analysis) => (
+                  <tr
+                    key={analysis.id}
+                    className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors"
+                    onClick={() => openViewModal(analysis)}
+                  >
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className="text-xs font-mono text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">
+                        {analysis.content_id || analysis.id.slice(0, 8)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="text-sm font-medium text-gray-900 line-clamp-1 max-w-[200px]">
                         {analysis.hook || 'No hook provided'}
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {analysis.target_emotion} • {analysis.expected_outcome}
-                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(analysis.priority)}`}>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(analysis.priority)}`}>
                         {analysis.priority || 'NORMAL'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(analysis.production_stage)}`}>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${getStageColor(analysis.production_stage)}`}>
                         {analysis.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {analysis.deadline ? new Date(analysis.deadline).toLocaleDateString() : 'No deadline'}
+                    <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
+                      {analysis.deadline ? new Date(analysis.deadline).toLocaleDateString() : '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex items-center -space-x-1">
                         {analysis.videographer && (
-                          <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center" title={`Videographer: ${analysis.videographer.full_name || analysis.videographer.email}`}>
-                            <span className="text-xs font-medium text-primary-700">V</span>
+                          <div className="w-5 h-5 rounded-full bg-primary-100 flex items-center justify-center border border-white" title={`Videographer: ${analysis.videographer.full_name || analysis.videographer.email}`}>
+                            <span className="text-[10px] font-medium text-primary-700">V</span>
                           </div>
                         )}
                         {analysis.posting_manager && (
-                          <div className="w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center" title={`Posting Manager: ${analysis.posting_manager.full_name || analysis.posting_manager.email}`}>
-                            <span className="text-xs font-medium text-pink-700">P</span>
+                          <div className="w-5 h-5 rounded-full bg-pink-100 flex items-center justify-center border border-white" title={`Posting Manager: ${analysis.posting_manager.full_name || analysis.posting_manager.email}`}>
+                            <span className="text-[10px] font-medium text-pink-700">P</span>
                           </div>
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <td className="px-3 py-2 whitespace-nowrap text-right">
                       <button
-                        onClick={() => openViewModal(analysis)}
-                        className="text-purple-600 hover:text-purple-900"
+                        onClick={(e) => { e.stopPropagation(); openViewModal(analysis); }}
+                        className="text-xs text-purple-600 hover:text-purple-900 font-medium"
                       >
-                        View & Update
+                        Open
                       </button>
                     </td>
                   </tr>
@@ -329,12 +442,29 @@ export default function EditorDashboard() {
               </tbody>
             </table>
           ) : (
-            <div className="text-center py-12">
-              <FilmIcon className="mx-auto h-12 w-12 text-gray-400" />
-              <p className="mt-2 text-gray-500">No projects assigned yet</p>
+            <div className="text-center py-10">
+              <FilmIcon className="mx-auto h-10 w-10 text-gray-400" />
+              <p className="mt-2 text-sm text-gray-500">
+                {analyses.length === 0 ? 'No projects assigned yet' : 'No projects match your search'}
+              </p>
+              {hasActiveFilters && (
+                <button
+                  onClick={clearFilters}
+                  className="mt-2 text-xs text-purple-600 hover:text-purple-700"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           )}
         </div>
+
+        {/* Results count footer */}
+        {filteredAnalyses.length > 0 && (
+          <div className="px-3 py-2 border-t border-gray-100 text-xs text-gray-500">
+            Showing {filteredAnalyses.length} of {analyses.length} projects
+          </div>
+        )}
       </div>
 
       {/* View & Update Modal */}
