@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { assignmentService } from '@/services/assignmentService';
+import { productionFilesService } from '@/services/productionFilesService';
 import {
   MegaphoneIcon,
   CheckCircleIcon,
@@ -11,11 +12,14 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   FunnelIcon,
-  XMarkIcon
+  XMarkIcon,
+  ArrowDownTrayIcon,
+  DocumentIcon,
+  FilmIcon
 } from '@heroicons/react/24/outline';
 import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import type { ViralAnalysis, UpdateProductionStageData } from '@/types';
+import type { ViralAnalysis, UpdateProductionStageData, ProductionFile } from '@/types';
 import { ProductionStage } from '@/types';
 
 // View types for the dashboard
@@ -54,6 +58,18 @@ export default function PostingManagerDashboard() {
   });
 
   const analyses = assignmentsData?.data || [];
+
+  // Fetch files for selected analysis
+  const { data: productionFiles = [] } = useQuery({
+    queryKey: ['production-files', selectedAnalysis?.id],
+    queryFn: () => productionFilesService.getFiles(selectedAnalysis!.id),
+    enabled: !!selectedAnalysis?.id,
+  });
+
+  // Filter to show edited and final videos (what posting manager needs)
+  const videoFiles = productionFiles.filter((f: ProductionFile) =>
+    f.file_type === 'edited-video' || f.file_type === 'final-video'
+  );
 
   // Update production stage mutation
   const updateStageMutation = useMutation({
@@ -843,6 +859,62 @@ export default function PostingManagerDashboard() {
                       </div>
                     </div>
                   )}
+
+                  {/* Video Files for Posting */}
+                  <div className="border-t pt-6">
+                    <div className="mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                        <FilmIcon className="w-5 h-5 mr-2 text-pink-600" />
+                        Videos Ready for Posting
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">Download the edited videos to post on social media</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {videoFiles.length > 0 ? (
+                        videoFiles.map((file: ProductionFile) => (
+                          <div key={file.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-pink-50 to-purple-50 border border-pink-200 rounded-lg">
+                            <div className="flex items-center space-x-3 flex-1 min-w-0">
+                              <DocumentIcon className="w-6 h-6 text-pink-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{file.file_name}</p>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    file.file_type === 'final-video'
+                                      ? 'bg-purple-100 text-purple-800'
+                                      : 'bg-green-100 text-green-800'
+                                  }`}>
+                                    {file.file_type === 'final-video' ? 'Final Video' : 'Edited Video'}
+                                  </span>
+                                </div>
+                                {file.description && (
+                                  <p className="text-xs text-gray-600 mt-0.5 truncate">{file.description}</p>
+                                )}
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  By {file.uploader?.full_name || file.uploader?.email || 'Editor'} • {new Date(file.created_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                            <a
+                              href={file.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 text-sm font-medium ml-3 transition"
+                            >
+                              <ArrowDownTrayIcon className="w-4 h-4 mr-1.5" />
+                              Download
+                            </a>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                          <FilmIcon className="mx-auto h-10 w-10 text-gray-400" />
+                          <p className="mt-2 text-sm text-gray-500">No videos available yet</p>
+                          <p className="text-xs text-gray-400">Waiting for editor to upload final videos</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Update Production Stage */}
                   <div className="border-t pt-6">
