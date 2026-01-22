@@ -43,7 +43,6 @@ export const adminUserService = {
         email: userData.email,
         full_name: userData.fullName,
         role: userData.role,
-        is_active: true,
         updated_at: new Date().toISOString(),
       });
 
@@ -63,7 +62,7 @@ export const adminUserService = {
    * Soft delete a user (admin only)
    * This doesn't delete the user from Supabase Auth (requires service role key),
    * but deactivates them by:
-   * 1. Setting is_active = false in profiles
+   * 1. Setting role = null in profiles (prevents access)
    * 2. Removing all their project assignments
    *
    * The user won't be able to access anything but their auth record remains.
@@ -95,11 +94,10 @@ export const adminUserService = {
       // Continue anyway - we still want to deactivate the user
     }
 
-    // Soft delete: Mark user as inactive and clear their role
+    // Soft delete: Clear the user's role so they can't access anything
     const { error: updateError } = await supabase
       .from('profiles')
       .update({
-        is_active: false,
         role: null, // Remove role so they can't access anything
         updated_at: new Date().toISOString(),
       })
@@ -116,13 +114,12 @@ export const adminUserService = {
   },
 
   /**
-   * Reactivate a previously deactivated user
+   * Reactivate a previously deactivated user by assigning them a role
    */
   async reactivateUser(userId: string, role: UserRole) {
     const { error } = await supabase
       .from('profiles')
       .update({
-        is_active: true,
         role: role,
         updated_at: new Date().toISOString(),
       })
