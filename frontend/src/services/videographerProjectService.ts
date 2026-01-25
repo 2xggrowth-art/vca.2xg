@@ -2,40 +2,72 @@ import { supabase } from '@/lib/supabase';
 import type { ViralAnalysis } from '@/types';
 
 export interface CreateVideographerProjectData {
-  title: string; // This will be the hook
-  reference_url: string;
-  description?: string;
-  estimated_shoot_date?: string;
-  people_required?: number;
+  referenceUrl: string;
+  title: string;
+  shootType?: string;
+  creatorName?: string;
+  hookTypes?: string[];
+  worksWithoutAudio?: string;
+  profileId: string;
 }
 
 export const videographerProjectService = {
   /**
    * Create a new viral analysis entry for videographer-initiated projects
+   * Includes all production details and generates proper content_id
    */
   async createProject(data: CreateVideographerProjectData): Promise<ViralAnalysis> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
+
+    // Get BCH industry ID (default industry)
+    const { data: bchIndustry } = await supabase
+      .from('industries')
+      .select('id')
+      .eq('short_code', 'BCH')
+      .single();
+
+    if (!bchIndustry) {
+      throw new Error('BCH industry not found');
+    }
 
     // Create viral_analysis entry with SHOOTING stage
     const { data: analysis, error } = await supabase
       .from('viral_analyses')
       .insert({
         user_id: user.id,
-        reference_url: data.reference_url,
-        hook: data.title,
-        how_to_replicate: data.description || 'Videographer-initiated project',
-        target_emotion: 'N/A',
-        expected_outcome: 'N/A',
+        reference_url: data.referenceUrl,
+        title: data.title,
+        shoot_type: data.shootType || null,
+        creator_name: data.creatorName || null,
+        works_without_audio: data.worksWithoutAudio || null,
         status: 'APPROVED', // Auto-approve videographer projects
         production_stage: 'SHOOTING',
         priority: 'NORMAL',
-        total_people_involved: data.people_required || 1,
+        industry_id: bchIndustry.id,
+        profile_id: data.profileId,
+        production_started_at: new Date().toISOString(),
       })
       .select()
       .single();
 
     if (error) throw error;
+
+    // Generate content_id using the RPC function
+    const { data: contentIdResult, error: contentIdError } = await supabase.rpc(
+      'generate_content_id_on_approval',
+      {
+        p_analysis_id: analysis.id,
+        p_profile_id: data.profileId,
+      }
+    );
+
+    if (contentIdError) {
+      console.error('Failed to generate content_id:', contentIdError);
+      // Don't throw - the project was created successfully
+    } else {
+      console.log('Generated content_id:', contentIdResult);
+    }
 
     // Assign videographer to the project
     const { error: assignmentError } = await supabase
@@ -50,6 +82,14 @@ export const videographerProjectService = {
     if (assignmentError) {
       console.error('Failed to create assignment:', assignmentError);
       // Don't throw - the project was created successfully
+    }
+
+    // Store hook types as comma-separated string in hook field (for filtering/display)
+    if (data.hookTypes && data.hookTypes.length > 0) {
+      await supabase
+        .from('viral_analyses')
+        .update({ hook: data.hookTypes.join(', ') })
+        .eq('id', analysis.id);
     }
 
     // Fetch the full analysis with assignments populated

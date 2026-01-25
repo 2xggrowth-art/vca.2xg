@@ -1,45 +1,127 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
 import { assignmentService } from '@/services/assignmentService';
 import { productionFilesService } from '@/services/productionFilesService';
 import { videographerProjectService } from '@/services/videographerProjectService';
-import { VideoCameraIcon, ClockIcon, CheckCircleIcon, PlayCircleIcon, EyeIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon } from '@heroicons/react/24/outline';
-import { useState } from 'react';
+import { videographerQueueService } from '@/services/videographerQueueService';
+import { contentConfigService } from '@/services/contentConfigService';
+import { VideoCameraIcon, ClockIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, UserGroupIcon, PlusIcon, ArrowPathIcon, InboxIcon } from '@heroicons/react/24/outline';
+import { useState, useMemo, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import type { ViralAnalysis, UpdateProductionStageData, ProductionFile } from '@/types';
-import { ProductionStage, FileType } from '@/types';
+import { ProductionStage, FileType, UserRole, ProductionStageV2 } from '@/types';
 import MultiFileUploadQueue from '@/components/MultiFileUploadQueue';
+import BottomNavigation from '@/components/BottomNavigation';
+import ProjectCard from '@/components/ProjectCard';
+import PickProjectModal from '@/components/PickProjectModal';
+
+// Constants for dropdowns
+const SHOOT_TYPES = ['Indoor', 'Outdoor', 'Both'];
+
+const HOOK_TYPES = [
+  { id: 'visual', label: 'Visual Hook' },
+  { id: 'audio', label: 'Audio Hook' },
+  { id: 'sfx', label: 'SFX Hook' },
+  { id: 'onscreen', label: 'Onscreen Hook' },
+];
+
+const WORKS_WITHOUT_AUDIO_OPTIONS = ['Yes', 'No', 'Maybe'];
+
+interface NewProjectFormData {
+  referenceUrl: string;
+  title: string;
+  shootType: string;
+  creatorName: string;
+  hookTypes: string[];
+  worksWithoutAudio: string;
+  profileId: string;
+}
+
+type TabType = 'available' | 'mywork' | 'profile';
 
 export default function VideographerDashboard() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get current tab from URL or default to 'available'
+  const currentTab = (searchParams.get('tab') as TabType) || 'available';
+
   const [selectedAnalysis, setSelectedAnalysis] = useState<ViralAnalysis | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string>('');
   const [productionNotes, setProductionNotes] = useState('');
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isPickProjectModalOpen, setIsPickProjectModalOpen] = useState(false);
+  const [selectedProjectToPick, setSelectedProjectToPick] = useState<ViralAnalysis | null>(null);
 
-  // New project request state
-  const [newProjectTitle, setNewProjectTitle] = useState('');
-  const [newProjectReferenceUrl, setNewProjectReferenceUrl] = useState('');
-  const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [newProjectShootDate, setNewProjectShootDate] = useState('');
-  const [newProjectPeople, setNewProjectPeople] = useState<number>(1);
+  // New project form state
+  const [newProjectForm, setNewProjectForm] = useState<NewProjectFormData>({
+    referenceUrl: '',
+    title: '',
+    shootType: '',
+    creatorName: '',
+    hookTypes: [],
+    worksWithoutAudio: '',
+    profileId: '',
+  });
+  const [isAddingProfile, setIsAddingProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
 
   // File upload state
   const [showFileForm, setShowFileForm] = useState(false);
 
-  // Fetch assigned analyses
-  const { data: assignmentsData, isLoading } = useQuery({
+  // Profile selection state for view modal (when profile not set during pick)
+  const [editingProfileId, setEditingProfileId] = useState<string>('');
+
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStage, setFilterStage] = useState<string>('');
+  const [filterPriority, setFilterPriority] = useState<string>('');
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Fetch available projects (PLANNING queue)
+  const { data: availableProjects = [], isLoading: isLoadingAvailable, refetch: refetchAvailable } = useQuery({
+    queryKey: ['videographer', 'available'],
+    queryFn: () => videographerQueueService.getAvailableProjects(),
+  });
+
+  // Fetch my assigned analyses
+  const { data: assignmentsData, isLoading: isLoadingAssignments } = useQuery({
     queryKey: ['videographer', 'assignments'],
     queryFn: () => assignmentService.getMyAssignedAnalyses(),
   });
 
-  const analyses = assignmentsData?.data || [];
+  const myProjects = assignmentsData?.data || [];
 
   // Fetch files for selected analysis
   const { data: productionFiles = [] } = useQuery({
     queryKey: ['production-files', selectedAnalysis?.id],
     queryFn: () => productionFilesService.getFiles(selectedAnalysis!.id),
     enabled: !!selectedAnalysis?.id,
+  });
+
+  // Fetch profiles for new project modal and view modal
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['profile-list'],
+    queryFn: contentConfigService.getAllProfiles,
+    enabled: isNewProjectModalOpen || isViewModalOpen,
+  });
+
+
+  // Create profile mutation (for new project modal)
+  const createProfileMutation = useMutation({
+    mutationFn: (name: string) => contentConfigService.createProfile({ name }),
+    onSuccess: (newProfile) => {
+      queryClient.invalidateQueries({ queryKey: ['profile-list'] });
+      setNewProjectForm(prev => ({ ...prev, profileId: newProfile.id }));
+      setNewProfileName('');
+      setIsAddingProfile(false);
+      toast.success(`Profile "${newProfile.name}" created!`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to create profile');
+    },
   });
 
   // Upload file mutation (for single file from multi-upload queue)
@@ -96,6 +178,71 @@ export default function VideographerDashboard() {
     },
   });
 
+  // Mark shooting complete mutation
+  const markShootingCompleteMutation = useMutation({
+    mutationFn: (data: { analysisId: string; productionNotes?: string }) =>
+      videographerQueueService.markShootingComplete(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['videographer', 'assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['videographer', 'my-projects'] });
+      toast.success('Shooting marked as complete! Project moved to editing queue.');
+      setIsViewModalOpen(false);
+      setSelectedAnalysis(null);
+      setProductionNotes('');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to mark shooting complete');
+    },
+  });
+
+  // Set profile and generate content ID mutation
+  const setProfileMutation = useMutation({
+    mutationFn: async (data: { analysisId: string; profileId: string }) => {
+      // First update the profile
+      const { error: updateError } = await supabase
+        .from('viral_analyses')
+        .update({ profile_id: data.profileId })
+        .eq('id', data.analysisId);
+
+      if (updateError) throw updateError;
+
+      // Then generate content ID if not already set
+      const { data: analysis } = await supabase
+        .from('viral_analyses')
+        .select('content_id')
+        .eq('id', data.analysisId)
+        .single();
+
+      if (!analysis?.content_id) {
+        const { error: contentIdError } = await supabase.rpc(
+          'generate_content_id_on_approval',
+          {
+            p_analysis_id: data.analysisId,
+            p_profile_id: data.profileId,
+          }
+        );
+
+        if (contentIdError) {
+          console.error('Failed to generate content_id:', contentIdError);
+          throw new Error('Failed to generate content ID');
+        }
+      }
+
+      // Fetch and return updated analysis
+      return videographerQueueService.getProjectById(data.analysisId);
+    },
+    onSuccess: (updatedProject) => {
+      queryClient.invalidateQueries({ queryKey: ['videographer', 'assignments'] });
+      // Update the selected analysis with new data
+      setSelectedAnalysis(updatedProject);
+      setEditingProfileId('');
+      toast.success('Profile set and Content ID generated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to set profile');
+    },
+  });
+
   // Create project mutation
   const createProjectMutation = useMutation({
     mutationFn: videographerProjectService.createProject,
@@ -115,11 +262,9 @@ export default function VideographerDashboard() {
       toast.success('Project created successfully! You can now start uploading footage.');
       setIsNewProjectModalOpen(false);
       // Reset form
-      setNewProjectTitle('');
-      setNewProjectReferenceUrl('');
-      setNewProjectDescription('');
-      setNewProjectShootDate('');
-      setNewProjectPeople(1);
+      resetNewProjectForm();
+      // Switch to My Work tab
+      setSearchParams({ tab: 'mywork' });
       // Open the new project
       openViewModal(newAnalysis);
     },
@@ -127,6 +272,52 @@ export default function VideographerDashboard() {
       toast.error(error.message || 'Failed to create project');
     },
   });
+
+  // Reset new project form
+  const resetNewProjectForm = () => {
+    setNewProjectForm({
+      referenceUrl: '',
+      title: '',
+      shootType: '',
+      creatorName: '',
+      hookTypes: [],
+      worksWithoutAudio: '',
+      profileId: '',
+    });
+    setIsAddingProfile(false);
+    setNewProfileName('');
+  };
+
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isNewProjectModalOpen) {
+      resetNewProjectForm();
+    }
+  }, [isNewProjectModalOpen]);
+
+  // Handle new project submission
+  const handleNewProjectSubmit = () => {
+    const errors: string[] = [];
+    if (!newProjectForm.referenceUrl.trim()) errors.push('Reference Link');
+    if (!newProjectForm.title.trim()) errors.push('Title');
+    if (!newProjectForm.profileId) errors.push('Profile');
+
+    if (errors.length > 0) {
+      toast.error(`Please fill: ${errors.join(', ')}`);
+      return;
+    }
+
+    // Map form data to service format
+    createProjectMutation.mutate({
+      referenceUrl: newProjectForm.referenceUrl,
+      title: newProjectForm.title,
+      shootType: newProjectForm.shootType || undefined,
+      creatorName: newProjectForm.creatorName || undefined,
+      hookTypes: newProjectForm.hookTypes.length > 0 ? newProjectForm.hookTypes : undefined,
+      worksWithoutAudio: newProjectForm.worksWithoutAudio || undefined,
+      profileId: newProjectForm.profileId,
+    });
+  };
 
   const openViewModal = (analysis: ViralAnalysis) => {
     setSelectedAnalysis(analysis);
@@ -136,6 +327,7 @@ export default function VideographerDashboard() {
     const isVideographerStage = currentStage && videographerStages.includes(currentStage as any);
     setSelectedStage(isVideographerStage ? currentStage! : ProductionStage.SHOOTING);
     setProductionNotes(analysis.production_notes || '');
+    setEditingProfileId(''); // Reset profile editing state
     setIsViewModalOpen(true);
   };
 
@@ -145,6 +337,7 @@ export default function VideographerDashboard() {
     setSelectedStage('');
     setProductionNotes('');
     setShowFileForm(false);
+    setEditingProfileId(''); // Reset profile editing state
   };
 
   const handleUpdateStage = (stageOverride?: string) => {
@@ -159,10 +352,30 @@ export default function VideographerDashboard() {
     });
   };
 
+  const handleMarkShootingComplete = () => {
+    if (!selectedAnalysis) return;
+
+    markShootingCompleteMutation.mutate({
+      analysisId: selectedAnalysis.id,
+      productionNotes,
+    });
+  };
+
   const handleDeleteFile = (fileId: string, fileName: string) => {
     if (confirm(`Are you sure you want to remove "${fileName}"?`)) {
       deleteFileMutation.mutate(fileId);
     }
+  };
+
+  const handlePickProject = (project: ViralAnalysis) => {
+    setSelectedProjectToPick(project);
+    setIsPickProjectModalOpen(true);
+  };
+
+  const handlePickProjectSuccess = (project: ViralAnalysis) => {
+    // Switch to My Work tab and open the project
+    setSearchParams({ tab: 'mywork' });
+    openViewModal(project);
   };
 
   const getFileTypeBadge = (type: string) => {
@@ -182,15 +395,18 @@ export default function VideographerDashboard() {
 
   const getStageColor = (stage?: string) => {
     switch (stage) {
+      case ProductionStageV2.PLANNING: return 'bg-blue-100 text-blue-800';
+      case ProductionStageV2.SHOOTING: return 'bg-yellow-100 text-yellow-800';
+      case ProductionStageV2.READY_FOR_EDIT: return 'bg-purple-100 text-purple-800';
+      case ProductionStageV2.EDITING: return 'bg-orange-100 text-orange-800';
+      case ProductionStageV2.READY_TO_POST: return 'bg-green-100 text-green-800';
+      case ProductionStageV2.POSTED: return 'bg-gray-100 text-gray-800';
+      // Legacy stages
       case ProductionStage.PRE_PRODUCTION: return 'bg-blue-100 text-blue-800';
       case ProductionStage.PLANNED: return 'bg-cyan-100 text-cyan-800';
-      case ProductionStage.SHOOTING: return 'bg-purple-100 text-purple-800';
       case ProductionStage.SHOOT_REVIEW: return 'bg-yellow-100 text-yellow-800';
-      case ProductionStage.EDITING: return 'bg-orange-100 text-orange-800';
       case ProductionStage.EDIT_REVIEW: return 'bg-pink-100 text-pink-800';
       case ProductionStage.FINAL_REVIEW: return 'bg-indigo-100 text-indigo-800';
-      case ProductionStage.READY_TO_POST: return 'bg-green-100 text-green-800';
-      case ProductionStage.POSTED: return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -207,206 +423,425 @@ export default function VideographerDashboard() {
 
   // Stats calculations
   const stats = {
-    total: analyses.length,
-    preProduction: analyses.filter(a => a.production_stage === ProductionStage.PRE_PRODUCTION).length,
-    shooting: analyses.filter(a => a.production_stage === ProductionStage.SHOOTING).length,
-    shootReview: analyses.filter(a => a.production_stage === ProductionStage.SHOOT_REVIEW).length,
+    available: availableProjects.length,
+    shooting: myProjects.filter(a => a.production_stage === ProductionStageV2.SHOOTING).length,
+    readyForEdit: myProjects.filter(a => a.production_stage === ProductionStageV2.READY_FOR_EDIT).length,
+    total: myProjects.length,
   };
 
-  // Videographers can only move to SHOOTING or submit for SHOOT_REVIEW
-  // They cannot change other stages - that's admin-only
+  // Videographers can only move to SHOOTING or submit for READY_FOR_EDIT
   const videographerStages = [
     ProductionStage.SHOOTING,
-    ProductionStage.SHOOT_REVIEW, // Submit for admin review
+    ProductionStageV2.SHOOTING,
+    ProductionStage.SHOOT_REVIEW, // Legacy
+    ProductionStageV2.READY_FOR_EDIT,
   ];
 
-  return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center">
-            <VideoCameraIcon className="w-8 h-8 mr-3 text-primary-600" />
-            Videographer Dashboard
-          </h1>
-          <p className="mt-2 text-gray-600">
-            Manage your assigned video projects
-          </p>
-        </div>
+  // Filtered analyses based on search and filters
+  const filteredMyProjects = useMemo(() => {
+    return myProjects.filter(analysis => {
+      // Search by project ID (content_id or id) or hook
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesContentId = analysis.content_id?.toLowerCase().includes(query);
+        const matchesId = analysis.id.toLowerCase().includes(query);
+        const matchesHook = analysis.hook?.toLowerCase().includes(query);
+        if (!matchesContentId && !matchesId && !matchesHook) return false;
+      }
+      if (filterStage && analysis.production_stage !== filterStage) return false;
+      if (filterPriority && analysis.priority !== filterPriority) return false;
+      return true;
+    });
+  }, [myProjects, searchQuery, filterStage, filterPriority]);
+
+  // Check if any filters are active
+  const hasActiveFilters = searchQuery || filterStage || filterPriority;
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterStage('');
+    setFilterPriority('');
+  };
+
+  // Set tab in URL
+  const setTab = (tab: TabType) => {
+    setSearchParams({ tab });
+  };
+
+  // Render Available Projects Tab
+  const renderAvailableTab = () => (
+    <div className="space-y-4">
+      {/* Pull to refresh indicator */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-gray-900">Available Projects</h2>
         <button
-          onClick={() => setIsNewProjectModalOpen(true)}
-          className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition flex items-center space-x-2"
+          onClick={() => refetchAvailable()}
+          disabled={isLoadingAvailable}
+          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
         >
-          <VideoCameraIcon className="w-5 h-5" />
-          <span>New Project</span>
+          <ArrowPathIcon className={`w-5 h-5 ${isLoadingAvailable ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Projects</p>
-              <p className="mt-2 text-3xl font-bold text-gray-900">{stats.total}</p>
-            </div>
-            <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
-              <VideoCameraIcon className="w-6 h-6 text-primary-600" />
-            </div>
-          </div>
-        </div>
+      <p className="text-sm text-gray-600">
+        Pick a project to start shooting. Projects in the planning stage are waiting for a videographer.
+      </p>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Pre-Production</p>
-              <p className="mt-2 text-3xl font-bold text-gray-900">{stats.preProduction}</p>
-            </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <ClockIcon className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
+      {isLoadingAvailable ? (
+        <div className="flex justify-center items-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
         </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Shooting</p>
-              <p className="mt-2 text-3xl font-bold text-gray-900">{stats.shooting}</p>
-            </div>
-            <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-              <PlayCircleIcon className="w-6 h-6 text-purple-600" />
-            </div>
-          </div>
+      ) : availableProjects.length > 0 ? (
+        <div className="space-y-4">
+          {availableProjects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              showStage={false}
+              actionButton={{
+                label: 'Pick Project',
+                onClick: () => handlePickProject(project),
+              }}
+            />
+          ))}
         </div>
+      ) : (
+        <div className="text-center py-16">
+          <InboxIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-4 text-lg font-medium text-gray-900">No projects available</h3>
+          <p className="mt-2 text-sm text-gray-500">
+            All projects have been picked up. Check back later for new ones.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">In Review</p>
-              <p className="mt-2 text-3xl font-bold text-gray-900">{stats.shootReview}</p>
-            </div>
-            <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <EyeIcon className="w-6 h-6 text-yellow-600" />
-            </div>
-          </div>
+  // Render My Work Tab
+  const renderMyWorkTab = () => (
+    <div className="space-y-4">
+      {/* Header with search */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-gray-900">My Projects</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-2 rounded-lg transition ${
+              showFilters || hasActiveFilters
+                ? 'bg-primary-100 text-primary-700'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <FunnelIcon className="w-5 h-5" />
+            {hasActiveFilters && (
+              <span className="sr-only">Filters active</span>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Assigned Projects */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">My Assigned Projects</h2>
-        </div>
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-            </div>
-          ) : analyses && analyses.length > 0 ? (
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Project
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Priority
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stage
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Deadline
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Team
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {analyses.map((analysis) => (
-                  <tr key={analysis.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900 line-clamp-2 max-w-xs">
-                        {analysis.hook || 'No hook provided'}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {analysis.target_emotion} • {analysis.expected_outcome}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(analysis.priority)}`}>
-                        {analysis.priority || 'NORMAL'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(analysis.production_stage)}`}>
-                        {analysis.production_stage?.replace(/_/g, ' ') || 'NOT STARTED'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {analysis.deadline ? new Date(analysis.deadline).toLocaleDateString() : 'No deadline'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        {analysis.editor && (
-                          <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center" title={`Editor: ${analysis.editor.full_name || analysis.editor.email}`}>
-                            <span className="text-xs font-medium text-purple-700">E</span>
-                          </div>
-                        )}
-                        {analysis.posting_manager && (
-                          <div className="w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center" title={`Posting Manager: ${analysis.posting_manager.full_name || analysis.posting_manager.email}`}>
-                            <span className="text-xs font-medium text-pink-700">P</span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => openViewModal(analysis)}
-                        className="text-primary-600 hover:text-primary-900"
-                      >
-                        View & Update
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="text-center py-12">
-              <VideoCameraIcon className="mx-auto h-12 w-12 text-gray-400" />
-              <p className="mt-2 text-gray-500">No projects assigned yet</p>
-            </div>
+      {/* Search & Filters */}
+      <div className="space-y-3">
+        <div className="relative">
+          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by ID or hook..."
+            className="w-full pl-10 pr-10 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <XMarkIcon className="w-5 h-5" />
+            </button>
           )}
         </div>
+
+        {showFilters && (
+          <div className="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-xl">
+            <select
+              value={filterStage}
+              onChange={(e) => setFilterStage(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">All Stages</option>
+              <option value={ProductionStageV2.SHOOTING}>Shooting</option>
+              <option value={ProductionStageV2.READY_FOR_EDIT}>Ready for Edit</option>
+            </select>
+
+            <select
+              value={filterPriority}
+              onChange={(e) => setFilterPriority(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">All Priorities</option>
+              <option value="URGENT">Urgent</option>
+              <option value="HIGH">High</option>
+              <option value="NORMAL">Normal</option>
+              <option value="LOW">Low</option>
+            </select>
+
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-yellow-50 rounded-xl p-3 text-center">
+          <p className="text-2xl font-bold text-yellow-700">{stats.shooting}</p>
+          <p className="text-xs text-yellow-600">Shooting</p>
+        </div>
+        <div className="bg-purple-50 rounded-xl p-3 text-center">
+          <p className="text-2xl font-bold text-purple-700">{stats.readyForEdit}</p>
+          <p className="text-xs text-purple-600">Ready for Edit</p>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <p className="text-2xl font-bold text-gray-700">{stats.total}</p>
+          <p className="text-xs text-gray-600">Total</p>
+        </div>
+      </div>
+
+      {/* Projects List */}
+      {isLoadingAssignments ? (
+        <div className="flex justify-center items-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        </div>
+      ) : filteredMyProjects.length > 0 ? (
+        <div className="space-y-4">
+          {filteredMyProjects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onClick={() => openViewModal(project)}
+              showStage={true}
+              showFileCount={true}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-16">
+          <VideoCameraIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-4 text-lg font-medium text-gray-900">
+            {myProjects.length === 0 ? 'No projects yet' : 'No projects match your search'}
+          </h3>
+          <p className="mt-2 text-sm text-gray-500">
+            {myProjects.length === 0
+              ? 'Pick a project from the Available tab to get started.'
+              : 'Try adjusting your filters.'}
+          </p>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="mt-4 text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Results count */}
+      {filteredMyProjects.length > 0 && (
+        <p className="text-xs text-center text-gray-500">
+          Showing {filteredMyProjects.length} of {myProjects.length} projects
+        </p>
+      )}
+    </div>
+  );
+
+  // Render Profile Tab
+  const renderProfileTab = () => (
+    <div className="space-y-4">
+      <h2 className="text-lg font-bold text-gray-900">Profile</h2>
+      <p className="text-sm text-gray-600">
+        Profile settings coming soon. For now, use the top navigation to access settings.
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="pb-20 md:pb-0">
+      {/* Desktop Header - Hidden on mobile */}
+      <div className="hidden md:block mb-8">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center">
+              <VideoCameraIcon className="w-8 h-8 mr-3 text-primary-600" />
+              Videographer Dashboard
+            </h1>
+            <p className="mt-2 text-gray-600">
+              Manage your assigned video projects
+            </p>
+          </div>
+          <button
+            onClick={() => setIsNewProjectModalOpen(true)}
+            className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition flex items-center space-x-2"
+          >
+            <VideoCameraIcon className="w-5 h-5" />
+            <span>New Project</span>
+          </button>
+        </div>
+
+        {/* Desktop Stats Grid */}
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mt-8">
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Available</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">{stats.available}</p>
+              </div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <InboxIcon className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Shooting</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">{stats.shooting}</p>
+              </div>
+              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <PlayCircleIcon className="w-6 h-6 text-yellow-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Ready for Edit</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">{stats.readyForEdit}</p>
+              </div>
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <CheckCircleIcon className="w-6 h-6 text-purple-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total Projects</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">{stats.total}</p>
+              </div>
+              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                <VideoCameraIcon className="w-6 h-6 text-primary-600" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Header */}
+      <div className="md:hidden mb-4">
+        <h1 className="text-xl font-bold text-gray-900">
+          {currentTab === 'available' ? 'Available Projects' : currentTab === 'mywork' ? 'My Projects' : 'Profile'}
+        </h1>
+      </div>
+
+      {/* Desktop Tab Switcher */}
+      <div className="hidden md:flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setTab('available')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            currentTab === 'available'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Available ({stats.available})
+        </button>
+        <button
+          onClick={() => setTab('mywork')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            currentTab === 'mywork'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          My Work ({stats.total})
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      <div className="space-y-6">
+        {currentTab === 'available' && renderAvailableTab()}
+        {currentTab === 'mywork' && renderMyWorkTab()}
+        {currentTab === 'profile' && renderProfileTab()}
+      </div>
+
+      {/* Bottom Navigation (Mobile only) */}
+      <BottomNavigation
+        role={UserRole.VIDEOGRAPHER}
+        onNewAction={() => setIsNewProjectModalOpen(true)}
+        badges={{
+          available: stats.available > 0 ? stats.available : undefined,
+          myWork: stats.shooting > 0 ? stats.shooting : undefined,
+        }}
+      />
+
+      {/* Pick Project Modal */}
+      <PickProjectModal
+        isOpen={isPickProjectModalOpen}
+        onClose={() => {
+          setIsPickProjectModalOpen(false);
+          setSelectedProjectToPick(null);
+        }}
+        project={selectedProjectToPick}
+        onSuccess={handlePickProjectSuccess}
+      />
 
       {/* View & Update Modal */}
       {isViewModalOpen && selectedAnalysis && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={closeViewModal}></div>
-            <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center">
-                      <VideoCameraIcon className="w-7 h-7 text-primary-600 mr-2" />
-                      Project Details
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop - only clickable on desktop, not on mobile to prevent accidental closes */}
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 transition-opacity hidden sm:block"
+            onClick={closeViewModal}
+          ></div>
+          {/* Mobile backdrop - no click handler to prevent accidental navigation */}
+          <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity sm:hidden"></div>
+
+          <div className="flex min-h-full items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="relative bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-4xl h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                {/* Mobile header with close button */}
+                <div className="flex justify-between items-start mb-4 sm:mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-lg sm:text-2xl font-bold text-gray-900 flex items-center">
+                      <VideoCameraIcon className="w-6 h-6 sm:w-7 sm:h-7 text-primary-600 mr-2 flex-shrink-0" />
+                      <span className="truncate">Project Details</span>
                     </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Script by {selectedAnalysis.full_name} • Assigned on {new Date(selectedAnalysis.created_at).toLocaleDateString()}
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1 truncate">
+                      Script by {selectedAnalysis.full_name} • {new Date(selectedAnalysis.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getPriorityColor(selectedAnalysis.priority)}`}>
+                  <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
+                    <span className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium border ${getPriorityColor(selectedAnalysis.priority)}`}>
                       {selectedAnalysis.priority || 'NORMAL'}
                     </span>
+                    {/* Close button - visible on all screen sizes */}
+                    <button
+                      onClick={closeViewModal}
+                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                    >
+                      <XMarkIcon className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
 
@@ -503,7 +938,7 @@ export default function VideographerDashboard() {
                   </div>
 
                   {/* Target Emotion & Expected Outcome */}
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Target Emotion</label>
                       <p className="text-gray-900 font-medium">{selectedAnalysis.target_emotion}</p>
@@ -516,7 +951,7 @@ export default function VideographerDashboard() {
 
                   {/* Deadline & Budget */}
                   {(selectedAnalysis.deadline || selectedAnalysis.budget) && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       {selectedAnalysis.deadline && (
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Deadline</label>
@@ -643,39 +1078,85 @@ export default function VideographerDashboard() {
                   </div>
 
                   {/* Production Details */}
-                  <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Production Details</h3>
+                  <div className="border-t pt-4 sm:pt-6">
+                    <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Production Details</h3>
 
-                    <div className="grid grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                       {/* Project Info */}
                       <div className="space-y-4">
+                        {/* Profile Selection - Required for Content ID */}
+                        <div className={`p-3 rounded-lg border-2 ${!selectedAnalysis.profile_id ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-200'}`}>
+                          <label className="text-sm font-medium text-gray-700 flex items-center gap-2 mb-2">
+                            <UserGroupIcon className="w-4 h-4" />
+                            Profile
+                            {!selectedAnalysis.profile_id && (
+                              <span className="text-xs text-amber-700 font-normal">(Required for Content ID)</span>
+                            )}
+                          </label>
+                          {selectedAnalysis.profile_id ? (
+                            <div className="flex flex-wrap gap-2">
+                              <span className="px-3 py-1.5 rounded-full text-sm font-medium bg-indigo-600 text-white ring-2 ring-indigo-300">
+                                <CheckCircleIcon className="w-4 h-4 inline mr-1" />
+                                {selectedAnalysis.profile?.name || profiles.find((p: any) => p.id === selectedAnalysis.profile_id)?.name || 'Unknown Profile'}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                {profiles.filter((p: any) => p.is_active).map((profile: any) => {
+                                  const isSelected = editingProfileId === profile.id;
+                                  return (
+                                    <button
+                                      key={profile.id}
+                                      type="button"
+                                      onClick={() => setEditingProfileId(profile.id)}
+                                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                                        isSelected
+                                          ? 'bg-indigo-600 text-white ring-2 ring-indigo-300'
+                                          : 'bg-white border border-gray-300 text-gray-700 hover:border-indigo-400'
+                                      }`}
+                                    >
+                                      {isSelected && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                                      {profile.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {editingProfileId && (
+                                <button
+                                  onClick={() => setProfileMutation.mutate({ analysisId: selectedAnalysis.id, profileId: editingProfileId })}
+                                  disabled={setProfileMutation.isPending}
+                                  className="w-full px-3 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
+                                >
+                                  {setProfileMutation.isPending ? 'Setting Profile...' : 'Set Profile & Generate Content ID'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
                         <div>
                           <label className="text-sm font-medium text-gray-700">Project ID</label>
-                          <p className="mt-1 text-sm text-gray-900">{selectedAnalysis.content_id || 'N/A'}</p>
+                          <p className={`mt-1 text-sm ${selectedAnalysis.content_id ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+                            {selectedAnalysis.content_id || 'Will be generated when profile is selected'}
+                          </p>
                         </div>
 
                         <div>
                           <label className="text-sm font-medium text-gray-700 mb-2 block">Production Stage</label>
                           <div className="flex items-center space-x-2">
-                            <span className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium ${
-                              selectedStage === ProductionStage.SHOOTING
-                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                : selectedStage === ProductionStage.SHOOT_REVIEW
-                                ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                                : 'bg-gray-100 text-gray-800 border border-gray-200'
-                            }`}>
-                              {selectedStage === ProductionStage.SHOOTING && '🎬 Shooting'}
-                              {selectedStage === ProductionStage.SHOOT_REVIEW && '⏳ Pending Review'}
-                              {selectedStage !== ProductionStage.SHOOTING && selectedStage !== ProductionStage.SHOOT_REVIEW && `${selectedStage}`}
+                            <span className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium ${getStageColor(selectedAnalysis.production_stage)}`}>
+                              {selectedAnalysis.production_stage === ProductionStageV2.SHOOTING && '🎬 Shooting'}
+                              {selectedAnalysis.production_stage === ProductionStageV2.READY_FOR_EDIT && '✅ Ready for Edit'}
+                              {selectedAnalysis.production_stage === ProductionStage.SHOOT_REVIEW && '⏳ Pending Review (Legacy)'}
+                              {!selectedAnalysis.production_stage && 'Unknown'}
+                              {selectedAnalysis.production_stage &&
+                                selectedAnalysis.production_stage !== ProductionStageV2.SHOOTING &&
+                                selectedAnalysis.production_stage !== ProductionStageV2.READY_FOR_EDIT &&
+                                selectedAnalysis.production_stage !== ProductionStage.SHOOT_REVIEW &&
+                                selectedAnalysis.production_stage.replace(/_/g, ' ')}
                             </span>
                           </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {selectedStage === ProductionStage.SHOOTING
-                              ? 'Click "Submit for Review" when done shooting'
-                              : selectedStage === ProductionStage.SHOOT_REVIEW
-                              ? 'Waiting for admin approval to proceed to editing'
-                              : 'Stage controlled by admin'}
-                          </p>
                         </div>
 
                         <div>
@@ -726,77 +1207,86 @@ export default function VideographerDashboard() {
                     </div>
 
                     {/* Production Notes */}
-                    <div className="mt-6">
+                    <div className="mt-4 sm:mt-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Production Notes</label>
                       <textarea
                         value={productionNotes}
                         onChange={(e) => setProductionNotes(e.target.value)}
-                        rows={4}
+                        rows={3}
                         placeholder="Add notes about the shoot, issues encountered, progress updates..."
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-sm sm:text-base"
                       />
-                      <p className="mt-2 text-xs text-gray-500">These notes will be visible to the admin and other team members</p>
+                      <p className="mt-1.5 sm:mt-2 text-xs text-gray-500">These notes will be visible to the admin and other team members</p>
+                    </div>
+
+                    {/* Action Buttons - Inside scrollable content */}
+                    <div className="mt-6 pt-4 border-t border-gray-200">
+                      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
+                        <button
+                          onClick={closeViewModal}
+                          className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm font-medium"
+                        >
+                          Cancel
+                        </button>
+
+                        {/* Save Notes Button */}
+                        <button
+                          onClick={() => handleUpdateStage()}
+                          disabled={updateStageMutation.isPending}
+                          className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center justify-center text-sm font-medium"
+                        >
+                          {updateStageMutation.isPending ? (
+                            <>
+                              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircleIcon className="w-5 h-5 mr-2" />
+                              Save Notes
+                            </>
+                          )}
+                        </button>
+
+                        {/* Mark Shooting Complete Button - Only shown when in SHOOTING stage */}
+                        {selectedAnalysis.production_stage === ProductionStageV2.SHOOTING && (
+                          <button
+                            onClick={handleMarkShootingComplete}
+                            disabled={markShootingCompleteMutation.isPending || productionFiles.length === 0 || !selectedAnalysis.profile_id}
+                            className="w-full sm:w-auto px-4 sm:px-6 py-2.5 sm:py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center justify-center text-sm font-medium"
+                            title={!selectedAnalysis.profile_id ? 'Select a profile first' : productionFiles.length === 0 ? 'Upload at least one file first' : ''}
+                          >
+                            {markShootingCompleteMutation.isPending ? (
+                              <>
+                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Completing...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircleIcon className="w-5 h-5 mr-2" />
+                                Mark Shooting Complete
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      {selectedAnalysis.production_stage === ProductionStageV2.SHOOTING && (!selectedAnalysis.profile_id || productionFiles.length === 0) && (
+                        <p className="mt-2 text-xs text-amber-600 text-center sm:text-right">
+                          {!selectedAnalysis.profile_id
+                            ? 'Select a profile above before marking shooting as complete'
+                            : 'Upload at least one file before marking shooting as complete'}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end space-x-3 border-t pt-6">
-                  <button
-                    onClick={closeViewModal}
-                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-
-                  {/* Save Notes Button - Always available */}
-                  <button
-                    onClick={() => handleUpdateStage()}
-                    disabled={updateStageMutation.isPending || selectedStage !== ProductionStage.SHOOTING}
-                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center"
-                  >
-                    {updateStageMutation.isPending ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircleIcon className="w-5 h-5 mr-2" />
-                        Save Notes
-                      </>
-                    )}
-                  </button>
-
-                  {/* Submit for Review Button - Only shown when in SHOOTING stage */}
-                  {selectedStage === ProductionStage.SHOOTING && (
-                    <button
-                      onClick={() => {
-                        handleUpdateStage(ProductionStage.SHOOT_REVIEW);
-                        setSelectedStage(ProductionStage.SHOOT_REVIEW);
-                      }}
-                      disabled={updateStageMutation.isPending}
-                      className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center"
-                    >
-                      {updateStageMutation.isPending ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Submitting...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircleIcon className="w-5 h-5 mr-2" />
-                          Submit for Review
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -805,134 +1295,278 @@ export default function VideographerDashboard() {
 
       {/* New Project Modal */}
       {isNewProjectModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={() => setIsNewProjectModalOpen(false)}></div>
-            <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full p-6">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 flex items-center">
-                    <VideoCameraIcon className="w-7 h-7 text-primary-600 mr-2" />
-                    New Project
-                  </h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Create a new video project and start shooting
-                  </p>
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop - only clickable on desktop */}
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 transition-opacity hidden sm:block"
+            onClick={() => setIsNewProjectModalOpen(false)}
+          ></div>
+          <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity sm:hidden"></div>
+
+          <div className="flex min-h-full items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="relative bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-2xl h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="flex-shrink-0 bg-gradient-to-r from-primary-600 to-purple-600 px-4 sm:px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center text-white">
+                  <VideoCameraIcon className="w-6 h-6 mr-2" />
+                  <div>
+                    <h2 className="text-lg font-bold">New Project</h2>
+                    <p className="text-xs text-white/80">Create and start shooting</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setIsNewProjectModalOpen(false)}
+                  className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Project Title <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newProjectTitle}
-                    onChange={(e) => setNewProjectTitle(e.target.value)}
-                    placeholder="e.g., Product Review - iPhone 15"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    required
-                  />
-                </div>
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
 
+                {/* Reference Link */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     Reference Link <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="url"
-                    value={newProjectReferenceUrl}
-                    onChange={(e) => setNewProjectReferenceUrl(e.target.value)}
+                    value={newProjectForm.referenceUrl}
+                    onChange={(e) => setNewProjectForm(prev => ({ ...prev, referenceUrl: e.target.value }))}
                     placeholder="https://www.instagram.com/reel/..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
                   />
                 </div>
 
+                {/* Title */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Project Description</label>
-                  <textarea
-                    value={newProjectDescription}
-                    onChange={(e) => setNewProjectDescription(e.target.value)}
-                    rows={4}
-                    placeholder="Describe the project, shooting requirements, expected outcome..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Title <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newProjectForm.title}
+                    onChange={(e) => setNewProjectForm(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="Enter a title for this project"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Estimated Shoot Date</label>
-                    <input
-                      type="date"
-                      value={newProjectShootDate}
-                      onChange={(e) => setNewProjectShootDate(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">People Required</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={newProjectPeople}
-                      onChange={(e) => setNewProjectPeople(parseInt(e.target.value) || 1)}
-                      placeholder="1"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    />
+                {/* Shoot Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Shoot Type</label>
+                  <div className="flex flex-wrap gap-2">
+                    {SHOOT_TYPES.map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setNewProjectForm(prev => ({ ...prev, shootType: type }))}
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                          newProjectForm.shootType === type
+                            ? 'bg-primary-600 text-white ring-2 ring-primary-300'
+                            : 'bg-white border border-gray-300 text-gray-700 hover:border-primary-400'
+                        }`}
+                      >
+                        {newProjectForm.shootType === type && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                        {type}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                {/* Creator Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Creator Name</label>
+                  <input
+                    type="text"
+                    value={newProjectForm.creatorName}
+                    onChange={(e) => setNewProjectForm(prev => ({ ...prev, creatorName: e.target.value }))}
+                    placeholder="Name of the original creator"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                  />
+                </div>
+
+                {/* Hook Type - Multi-select */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hook Type <span className="text-gray-400">(select all that apply)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {HOOK_TYPES.map((hook) => {
+                      const isSelected = newProjectForm.hookTypes.includes(hook.id);
+                      return (
+                        <button
+                          key={hook.id}
+                          type="button"
+                          onClick={() => {
+                            setNewProjectForm(prev => ({
+                              ...prev,
+                              hookTypes: isSelected
+                                ? prev.hookTypes.filter(h => h !== hook.id)
+                                : [...prev.hookTypes, hook.id]
+                            }));
+                          }}
+                          className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                            isSelected
+                              ? 'bg-purple-600 text-white ring-2 ring-purple-300'
+                              : 'bg-white border border-gray-300 text-gray-700 hover:border-purple-400'
+                          }`}
+                        >
+                          {isSelected && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                          {hook.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Works Without Audio */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Works Without Audio?</label>
+                  <div className="flex flex-wrap gap-2">
+                    {WORKS_WITHOUT_AUDIO_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setNewProjectForm(prev => ({ ...prev, worksWithoutAudio: option }))}
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                          newProjectForm.worksWithoutAudio === option
+                            ? 'bg-green-600 text-white ring-2 ring-green-300'
+                            : 'bg-white border border-gray-300 text-gray-700 hover:border-green-400'
+                        }`}
+                      >
+                        {newProjectForm.worksWithoutAudio === option && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Profile Selection */}
+                <div className={`rounded-lg p-3 border ${!newProjectForm.profileId ? 'bg-red-50 border-red-200' : 'bg-indigo-50 border-indigo-200'}`}>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <UserGroupIcon className="w-4 h-4 inline mr-1" />
+                    Profile <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {profiles
+                      .filter((p: any) => p.is_active)
+                      .map((profile: any) => {
+                        const isSelected = newProjectForm.profileId === profile.id;
+                        return (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            onClick={() => setNewProjectForm(prev => ({ ...prev, profileId: profile.id }))}
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white ring-2 ring-indigo-300'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:border-indigo-400'
+                            }`}
+                          >
+                            {isSelected && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                            {profile.name}
+                          </button>
+                        );
+                      })}
+                    {!isAddingProfile && (
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingProfile(true)}
+                        className="px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 border border-dashed border-gray-400"
+                      >
+                        <PlusIcon className="w-4 h-4 inline mr-1" />
+                        Add
+                      </button>
+                    )}
+                    {isAddingProfile && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newProfileName}
+                          onChange={(e) => setNewProfileName(e.target.value)}
+                          placeholder="New profile name"
+                          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 w-32"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && newProfileName.trim()) {
+                              e.preventDefault();
+                              createProfileMutation.mutate(newProfileName.trim());
+                            } else if (e.key === 'Escape') {
+                              setIsAddingProfile(false);
+                              setNewProfileName('');
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (newProfileName.trim()) {
+                              createProfileMutation.mutate(newProfileName.trim());
+                            }
+                          }}
+                          disabled={!newProfileName.trim() || createProfileMutation.isPending}
+                          className="px-2 py-1 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {createProfileMutation.isPending ? '...' : 'Add'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingProfile(false);
+                            setNewProfileName('');
+                          }}
+                          className="p-1 text-gray-500 hover:text-gray-700"
+                        >
+                          <XMarkIcon className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Info Note */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <p className="text-sm text-blue-800">
-                    <strong>Note:</strong> This will create a new project and assign it to you. You can start uploading footage immediately.
+                    <strong>Note:</strong> This will create a project with a proper content ID and assign it to you. You can start uploading footage immediately.
                   </p>
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-end space-x-3">
-                <button
-                  onClick={() => setIsNewProjectModalOpen(false)}
-                  disabled={createProjectMutation.isPending}
-                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (!newProjectTitle.trim()) {
-                      toast.error('Project title is required');
-                      return;
-                    }
-                    if (!newProjectReferenceUrl.trim()) {
-                      toast.error('Reference link is required');
-                      return;
-                    }
-
-                    createProjectMutation.mutate({
-                      title: newProjectTitle,
-                      reference_url: newProjectReferenceUrl,
-                      description: newProjectDescription || undefined,
-                      estimated_shoot_date: newProjectShootDate || undefined,
-                      people_required: newProjectPeople,
-                    });
-                  }}
-                  disabled={createProjectMutation.isPending || !newProjectTitle.trim() || !newProjectReferenceUrl.trim()}
-                  className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  {createProjectMutation.isPending ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Creating...
-                    </>
-                  ) : (
-                    'Create Project'
-                  )}
-                </button>
+              {/* Footer Actions */}
+              <div className="flex-shrink-0 border-t border-gray-200 bg-white p-4 sm:px-6">
+                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsNewProjectModalOpen(false)}
+                    disabled={createProjectMutation.isPending}
+                    className="w-full sm:w-auto px-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNewProjectSubmit}
+                    disabled={createProjectMutation.isPending}
+                    className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center justify-center text-sm font-medium"
+                  >
+                    {createProjectMutation.isPending ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <VideoCameraIcon className="w-5 h-5 mr-2" />
+                        Create Project
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

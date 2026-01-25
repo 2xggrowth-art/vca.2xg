@@ -14,6 +14,7 @@ import {
   XCircleIcon,
   ExclamationTriangleIcon,
   MagnifyingGlassIcon,
+  LinkIcon,
 } from '@heroicons/react/24/outline';
 import AssignTeamModal from '@/components/AssignTeamModal';
 import RejectScriptModal from '@/components/admin/RejectScriptModal';
@@ -89,6 +90,7 @@ export default function NeedApprovalPage() {
           )
         `
         )
+        .eq('status', 'APPROVED')
         .eq('production_stage', 'SHOOT_REVIEW')
         .order('updated_at', { ascending: true });
 
@@ -120,6 +122,7 @@ export default function NeedApprovalPage() {
           )
         `
         )
+        .eq('status', 'APPROVED')
         .eq('production_stage', 'EDIT_REVIEW')
         .order('updated_at', { ascending: true });
 
@@ -142,6 +145,13 @@ export default function NeedApprovalPage() {
     enabled: !!activeShootId,
   });
 
+  // Fetch files for selected edit
+  const { data: editFiles = [] } = useQuery({
+    queryKey: ['production-files', activeEditId],
+    queryFn: () => productionFilesService.getFiles(activeEditId!),
+    enabled: !!activeEditId,
+  });
+
   // Fetch all approved scripts (for viewing/disapproving)
   const { data: approvedScripts = [], isLoading: approvedLoading } = useQuery({
     queryKey: ['admin', 'approved-scripts'],
@@ -154,9 +164,7 @@ export default function NeedApprovalPage() {
           profiles:user_id (email, full_name, avatar_url),
           assignments:project_assignments (
             *,
-            videographer:profiles!project_assignments_videographer_id_fkey (id, email, full_name, avatar_url),
-            editor:profiles!project_assignments_editor_id_fkey (id, email, full_name, avatar_url),
-            posting_manager:profiles!project_assignments_posting_manager_id_fkey (id, email, full_name, avatar_url)
+            user:profiles!project_assignments_user_id_fkey (id, email, full_name, avatar_url, role)
           )
         `
         )
@@ -171,6 +179,9 @@ export default function NeedApprovalPage() {
         email: item.profiles?.email,
         full_name: item.profiles?.full_name,
         avatar_url: item.profiles?.avatar_url,
+        videographer: item.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
+        editor: item.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
+        posting_manager: item.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
       }));
     },
   });
@@ -182,6 +193,8 @@ export default function NeedApprovalPage() {
     onSuccess: (updatedAnalysis) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'approved-scripts'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
       toast.success('Script approved! Assign team members now.');
       setActiveScriptId(null);
       // Open team assignment modal
@@ -200,6 +213,7 @@ export default function NeedApprovalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['analyses'] });
       toast.success('Script rejected');
       setActiveScriptId(null);
       setSelectedScript(null);
@@ -216,6 +230,8 @@ export default function NeedApprovalPage() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'shoot-reviews'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-files-all'] });
 
       if (variables.production_stage === 'EDITING') {
         toast.success('Shoot approved! Moving to editing stage.');
@@ -237,6 +253,8 @@ export default function NeedApprovalPage() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'edit-reviews'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-files-all'] });
 
       if (variables.production_stage === 'FINAL_REVIEW') {
         toast.success('Edit approved! Moving to final review.');
@@ -298,6 +316,8 @@ export default function NeedApprovalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'approved-scripts'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
       toast.success(`${scriptsSelection.selectedCount} scripts approved!`);
       scriptsSelection.deselectAll();
     },
@@ -324,6 +344,7 @@ export default function NeedApprovalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['analyses'] });
       toast.success(`${scriptsSelection.selectedCount} scripts rejected!`);
       scriptsSelection.deselectAll();
       setShowBulkRejectModal(false);
@@ -344,6 +365,7 @@ export default function NeedApprovalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'shoot-reviews'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
       toast.success(`${shootsSelection.selectedCount} shoots approved!`);
       shootsSelection.deselectAll();
     },
@@ -363,6 +385,7 @@ export default function NeedApprovalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'edit-reviews'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
       toast.success(`${editsSelection.selectedCount} edits approved!`);
       editsSelection.deselectAll();
     },
@@ -800,9 +823,23 @@ export default function NeedApprovalPage() {
                         </div>
 
                         {/* Hook */}
-                        <h3 className="text-sm font-medium text-gray-900 truncate">
-                          {item.hook || 'No hook provided'}
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-sm font-medium text-gray-900 truncate">
+                            {item.hook || 'No hook provided'}
+                          </h3>
+                          {item.reference_url && (
+                            <a
+                              href={item.reference_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center justify-center p-1 text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded-lg transition flex-shrink-0"
+                              title={item.reference_url}
+                            >
+                              <LinkIcon className="w-4 h-4" />
+                            </a>
+                          )}
+                        </div>
 
                         {/* Meta info */}
                         <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
@@ -914,6 +951,7 @@ export default function NeedApprovalPage() {
         detailType={detailType}
         onClose={handleCloseDetail}
         shootFiles={activeTab === 'shoots' ? shootFiles : undefined}
+        editFiles={activeTab === 'edits' ? editFiles : undefined}
         isSubmitting={
           approveScriptMutation.isPending ||
           rejectScriptMutation.isPending ||

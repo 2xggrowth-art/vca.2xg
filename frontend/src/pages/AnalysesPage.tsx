@@ -21,6 +21,7 @@ import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import ReviewScoreInput from '@/components/ReviewScoreInput';
 import { MultiStepAnalysisWizard } from '@/components/wizard';
+import BottomNavigation from '@/components/BottomNavigation';
 import type { ViralAnalysis, AnalysisFormData, ReviewAnalysisData } from '@/types';
 import { UserRole } from '@/types';
 
@@ -30,6 +31,7 @@ type TabType = 'pending' | 'approved' | 'rejected';
 const createDefaultFormData = (): AnalysisFormData => ({
   // Existing fields
   referenceUrl: '',
+  title: '',
   hook: '',
   hookVoiceNote: null,
   hookVoiceNoteUrl: '',
@@ -49,6 +51,7 @@ const createDefaultFormData = (): AnalysisFormData => ({
   charactersInvolved: '',
   creatorName: '',
   unusualElement: '',
+  hookTypes: [],
   worksWithoutAudio: '',
   contentRating: 5,
   replicationStrength: 5,
@@ -207,6 +210,7 @@ export default function AnalysesPage() {
       setFormData({
         ...createDefaultFormData(),
         referenceUrl: analysis.reference_url || '',
+        title: analysis.title || '',
         hook: analysis.hook || '',
         hookVoiceNoteUrl: analysis.hook_voice_note_url || '',
         whyViral: analysis.why_viral || '',
@@ -304,15 +308,19 @@ export default function AnalysesPage() {
     reviewMutation.mutate({ id: viewingAnalysis.id, data: reviewData });
   };
 
-  const handleSubmit = (data: AnalysisFormData) => {
-    if (!data.hook && !data.hookVoiceNote) {
-      toast.error('Please provide a hook either by typing or voice note');
+  const handleSubmit = (data: AnalysisFormData, clearDraft: () => void) => {
+    if (!data.title?.trim()) {
+      toast.error('Please provide a title for the script');
       return;
     }
     if (editingAnalysis) {
-      updateMutation.mutate({ id: editingAnalysis.id, data });
+      updateMutation.mutate({ id: editingAnalysis.id, data }, {
+        onSuccess: () => clearDraft(),
+      });
     } else {
-      createMutation.mutate(data);
+      createMutation.mutate(data, {
+        onSuccess: () => clearDraft(),
+      });
     }
   };
 
@@ -341,6 +349,7 @@ export default function AnalysesPage() {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter((a: ViralAnalysis) =>
+        a.title?.toLowerCase().includes(query) ||
         a.hook?.toLowerCase().includes(query) ||
         a.id?.toLowerCase().includes(query) ||
         a.reference_url?.toLowerCase().includes(query) ||
@@ -385,7 +394,7 @@ export default function AnalysesPage() {
           </div>
           <button
             onClick={() => openModal()}
-            className="inline-flex items-center px-5 py-2.5 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 transition"
+            className="hidden md:inline-flex items-center px-5 py-2.5 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 transition"
           >
             <PlusIcon className="h-5 w-5 mr-2" />
             Add New Video
@@ -394,22 +403,22 @@ export default function AnalysesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="bg-white rounded-t-xl border border-gray-200 border-b-0">
-        <div className="flex">
+      <div className="bg-white rounded-t-xl border border-gray-200 border-b-0 overflow-x-auto">
+        <div className="flex min-w-fit">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 md:flex-none px-4 md:px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
+              className={`flex-1 md:flex-none px-3 md:px-6 py-3 text-xs md:text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1.5 md:gap-2 whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-primary-600 text-primary-600 bg-primary-50/50'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
             >
-              {tab.icon}
+              <span className="hidden md:inline">{tab.icon}</span>
               <span>{tab.label}</span>
               <span
-                className={`px-2 py-0.5 text-xs rounded-full ${
+                className={`px-1.5 md:px-2 py-0.5 text-xs rounded-full ${
                   activeTab === tab.id
                     ? 'bg-primary-100 text-primary-700'
                     : 'bg-gray-100 text-gray-600'
@@ -428,7 +437,7 @@ export default function AnalysesPage() {
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by hook, content ID, platform, emotion..."
+            placeholder="Search by title, content ID, platform, emotion..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -448,7 +457,7 @@ export default function AnalysesPage() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    Hook
+                    Title
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">
                     Platform
@@ -471,14 +480,14 @@ export default function AnalysesPage() {
                 {filteredAnalyses.map((analysis: ViralAnalysis) => (
                   <tr
                     key={analysis.id}
-                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    className="hover:bg-gray-50 transition-colors cursor-pointer active:bg-gray-100"
                     onClick={() => openViewModal(analysis)}
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-4 md:py-3">
                       <div className="flex items-start gap-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate max-w-[300px]">
-                            {analysis.hook || 'Untitled'}
+                            {analysis.title || analysis.hook || 'Untitled'}
                           </p>
                           <p className="text-xs text-gray-500 truncate max-w-[300px] mt-0.5">
                             ID: {analysis.id.slice(0, 8)}...
@@ -612,18 +621,6 @@ export default function AnalysesPage() {
         )}
       </div>
 
-      {/* Fixed Bottom Action Button (Mobile Only) */}
-      {analyses && analyses.length > 0 && (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 safe-area-bottom z-40">
-          <button
-            onClick={() => openModal()}
-            className="w-full inline-flex items-center justify-center px-6 py-3 min-h-[56px] border border-transparent shadow-lg text-base font-semibold rounded-lg text-white bg-primary-600 hover:bg-primary-700 active:bg-primary-800 transition"
-          >
-            <PlusIcon className="h-6 w-6 mr-2" />
-            Add New Video
-          </button>
-        </div>
-      )}
 
       {/* Multi-Step Analysis Wizard */}
       <MultiStepAnalysisWizard
@@ -1151,6 +1148,12 @@ export default function AnalysesPage() {
           </div>
         </div>
       )}
+
+      {/* Bottom Navigation (Mobile) */}
+      <BottomNavigation
+        role={UserRole.SCRIPT_WRITER}
+        onNewAction={() => openModal()}
+      />
     </div>
   );
 }

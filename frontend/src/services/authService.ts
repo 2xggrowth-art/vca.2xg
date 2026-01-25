@@ -28,10 +28,13 @@ export const authService = {
     return data;
   },
 
-  // Sign out
+  // Sign out (use local scope to avoid 403 errors)
   async signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    // Ignore AuthSessionMissingError - logging out when already logged out should succeed silently
+    if (error && error.name !== 'AuthSessionMissingError') {
+      throw error;
+    }
   },
 
   // Get current user

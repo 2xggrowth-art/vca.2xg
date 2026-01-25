@@ -15,15 +15,16 @@ import {
   ArrowPathIcon,
   FlagIcon,
   LinkIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
-import { ProductionStage, Priority } from '@/types';
+import { ProductionStage, ProductionStageV2, Priority } from '@/types';
 import type { ViralAnalysis } from '@/types';
 import { SplitViewLayout } from '@/components/admin/layout/SplitViewLayout';
 import { BulkActionToolbar, type BulkAction } from '@/components/admin/layout/BulkActionToolbar';
 import { useSelection } from '@/hooks/useSelection';
 import ProductionDetailPanel from '@/components/admin/ProductionDetailPanel';
 
-type TabType = 'unassigned' | 'planning' | 'shooting' | 'editing' | 'ready' | 'posted';
+type TabType = 'planning' | 'shooting' | 'readyForEdit' | 'editing' | 'readyToPost' | 'posted';
 
 interface ProductionFile {
   id: string;
@@ -36,10 +37,11 @@ interface ProductionFile {
 
 export default function ProductionStatusPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabType>('unassigned');
+  const [activeTab, setActiveTab] = useState<TabType>('planning');
   const [searchQuery, setSearchQuery] = useState('');
   const [showTodayOnly, setShowTodayOnly] = useState(false);
   const [showShootingTodayOnly, setShowShootingTodayOnly] = useState(false);
+  const [profileFilter, setProfileFilter] = useState<string>('');
 
   // Selection hook for bulk actions
   const {
@@ -64,6 +66,7 @@ export default function ProductionStatusPage() {
         .select(`
           *,
           profiles:user_id (email, full_name, avatar_url),
+          profile:profile_id (id, name),
           project_assignments (
             role,
             user:user_id (id, email, full_name, avatar_url)
@@ -82,6 +85,7 @@ export default function ProductionStatusPage() {
         email: item.profiles?.email,
         full_name: item.profiles?.full_name,
         avatar_url: item.profiles?.avatar_url,
+        profile: item.profile, // Profile from profile_list table
         videographer: item.project_assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
         editor: item.project_assignments?.find((a: any) => a.role === 'EDITOR')?.user,
         posting_manager: item.project_assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
@@ -206,18 +210,76 @@ export default function ProductionStatusPage() {
     },
   });
 
-  // Filter by search
+  // Bulk mutation to delete projects
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      const { error } = await supabase
+        .from('viral_analyses')
+        .delete()
+        .in('id', ids);
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
+      queryClient.invalidateQueries({ queryKey: ['analyses'] });
+      toast.success(`${variables.ids.length} project${variables.ids.length > 1 ? 's' : ''} deleted`);
+      deselectAll();
+      setActiveItem(null);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete projects');
+    },
+  });
+
+  // Get unique profiles for filter dropdown
+  const uniqueProfiles = useMemo(() => {
+    const profiles = analyses
+      .filter(a => a.profile?.name)
+      .map(a => ({ id: a.profile!.id, name: a.profile!.name }));
+
+    // Remove duplicates by id
+    const seen = new Set<string>();
+    return profiles.filter(p => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [analyses]);
+
+  // Filter by search and profile
   const filteredAnalyses = useMemo(() => {
-    if (!searchQuery.trim()) return analyses;
-    const search = searchQuery.toLowerCase();
-    return analyses.filter(a =>
-      a.content_id?.toLowerCase().includes(search) ||
-      a.hook?.toLowerCase().includes(search) ||
-      a.videographer?.full_name?.toLowerCase().includes(search) ||
-      a.editor?.full_name?.toLowerCase().includes(search) ||
-      a.posting_manager?.full_name?.toLowerCase().includes(search)
-    );
-  }, [analyses, searchQuery]);
+    let result = analyses;
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const search = searchQuery.toLowerCase();
+      result = result.filter(a => {
+        // Check content_id (includes BCH prefix)
+        if (a.content_id?.toLowerCase().includes(search)) return true;
+        // Check title
+        if (a.title?.toLowerCase().includes(search)) return true;
+        // Check hook (for backwards compatibility)
+        if (a.hook?.toLowerCase().includes(search)) return true;
+        // Check profile name
+        if (a.profile?.name?.toLowerCase().includes(search)) return true;
+        // Check team members
+        if (a.videographer?.full_name?.toLowerCase().includes(search)) return true;
+        if (a.videographer?.email?.toLowerCase().includes(search)) return true;
+        if (a.editor?.full_name?.toLowerCase().includes(search)) return true;
+        if (a.editor?.email?.toLowerCase().includes(search)) return true;
+        if (a.posting_manager?.full_name?.toLowerCase().includes(search)) return true;
+        if (a.posting_manager?.email?.toLowerCase().includes(search)) return true;
+        return false;
+      });
+    }
+
+    // Filter by profile
+    if (profileFilter) {
+      result = result.filter(a => a.profile?.id === profileFilter);
+    }
+
+    return result;
+  }, [analyses, searchQuery, profileFilter]);
 
   // Helper to check if a date is today
   const isToday = (dateStr?: string) => {
@@ -227,48 +289,71 @@ export default function ProductionStatusPage() {
     return date.toDateString() === today.toDateString();
   };
 
-  // Group by tabs
-  const unassigned = filteredAnalyses.filter(a => !a.videographer && !a.editor && !a.posting_manager);
-  const planningAll = filteredAnalyses.filter(a =>
-    a.production_stage === ProductionStage.PRE_PRODUCTION ||
-    a.production_stage === ProductionStage.PLANNED
-  );
+  // Group by tabs using V2 stages (also support legacy stages for backwards compatibility)
+  // Cast to string for comparison since the database may have either old or new stage values
+  const planningAll = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.PLANNING ||
+      stage === ProductionStage.NOT_STARTED ||
+      stage === ProductionStage.PRE_PRODUCTION ||
+      stage === ProductionStage.PLANNED ||
+      (!stage && a.status === 'APPROVED'); // Approved but no stage yet
+  });
   const planningToday = planningAll.filter(a => isToday(a.planned_date));
   const planning = showTodayOnly ? planningToday : planningAll;
 
-  const shootingAll = filteredAnalyses.filter(a =>
-    a.production_stage === ProductionStage.SHOOTING ||
-    a.production_stage === ProductionStage.SHOOT_REVIEW
-  );
+  const shootingAll = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.SHOOTING ||
+      stage === ProductionStage.SHOOTING;
+  });
   const shootingToday = shootingAll.filter(a => isToday(a.planned_date));
   const shooting = showShootingTodayOnly ? shootingToday : shootingAll;
 
-  const editing = filteredAnalyses.filter(a =>
-    a.production_stage === ProductionStage.EDITING ||
-    a.production_stage === ProductionStage.EDIT_REVIEW
-  );
-  const ready = filteredAnalyses.filter(a =>
-    a.production_stage === ProductionStage.FINAL_REVIEW ||
-    a.production_stage === ProductionStage.READY_TO_POST
-  );
-  const posted = filteredAnalyses.filter(a => a.production_stage === ProductionStage.POSTED);
+  // Ready for Edit (new V2 stage, replaces SHOOT_REVIEW)
+  const readyForEdit = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.READY_FOR_EDIT ||
+      stage === ProductionStage.SHOOT_REVIEW;
+  });
+
+  const editing = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.EDITING ||
+      stage === ProductionStage.EDITING ||
+      stage === ProductionStage.EDIT_REVIEW;
+  });
+
+  // Ready to Post (new V2 stage, replaces FINAL_REVIEW)
+  const readyToPost = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.READY_TO_POST ||
+      stage === ProductionStage.FINAL_REVIEW ||
+      stage === ProductionStage.READY_TO_POST;
+  });
+
+  const posted = filteredAnalyses.filter(a => {
+    const stage = a.production_stage as string;
+    return stage === ProductionStageV2.POSTED ||
+      stage === ProductionStage.POSTED;
+  });
 
   const tabs = [
-    { id: 'unassigned' as TabType, label: 'Unassigned', count: unassigned.length, color: 'red' },
     { id: 'planning' as TabType, label: 'Planning', count: planningAll.length, todayCount: planningToday.length, color: 'cyan' },
     { id: 'shooting' as TabType, label: 'Shooting', count: shootingAll.length, todayCount: shootingToday.length, color: 'indigo' },
+    { id: 'readyForEdit' as TabType, label: 'Ready for Edit', count: readyForEdit.length, color: 'yellow' },
     { id: 'editing' as TabType, label: 'Editing', count: editing.length, color: 'purple' },
-    { id: 'ready' as TabType, label: 'Ready to Post', count: ready.length, color: 'green' },
+    { id: 'readyToPost' as TabType, label: 'Ready to Post', count: readyToPost.length, color: 'green' },
     { id: 'posted' as TabType, label: 'Posted', count: posted.length, color: 'emerald' },
   ];
 
   const getCurrentData = (): ViralAnalysis[] => {
     switch (activeTab) {
-      case 'unassigned': return unassigned;
       case 'planning': return planning;
       case 'shooting': return shooting;
+      case 'readyForEdit': return readyForEdit;
       case 'editing': return editing;
-      case 'ready': return ready;
+      case 'readyToPost': return readyToPost;
       case 'posted': return posted;
       default: return [];
     }
@@ -296,6 +381,11 @@ export default function ProductionStatusPage() {
     }
 
     return { status: 'pending', file: null, icon: MinusCircleIcon, color: 'text-gray-400' };
+  };
+
+  const getFilesForProject = (analysisId: string, fileTypes: string[]) => {
+    const files = productionFiles[analysisId] || [];
+    return files.filter(f => fileTypes.includes(f.file_type));
   };
 
   const handleViewFile = (fileUrl: string) => {
@@ -331,6 +421,15 @@ export default function ProductionStatusPage() {
 
   const getStageColor = (stage?: string) => {
     switch (stage) {
+      // V2 Stages
+      case ProductionStageV2.PLANNING: return 'bg-cyan-100 text-cyan-800';
+      case ProductionStageV2.SHOOTING: return 'bg-indigo-100 text-indigo-800';
+      case ProductionStageV2.READY_FOR_EDIT: return 'bg-yellow-100 text-yellow-800';
+      case ProductionStageV2.EDITING: return 'bg-purple-100 text-purple-800';
+      case ProductionStageV2.READY_TO_POST: return 'bg-green-100 text-green-800';
+      case ProductionStageV2.POSTED: return 'bg-emerald-100 text-emerald-800';
+      // Legacy stages for backwards compatibility
+      case ProductionStage.NOT_STARTED: return 'bg-gray-100 text-gray-800';
       case ProductionStage.PRE_PRODUCTION: return 'bg-blue-100 text-blue-800';
       case ProductionStage.PLANNED: return 'bg-cyan-100 text-cyan-800';
       case ProductionStage.SHOOTING: return 'bg-indigo-100 text-indigo-800';
@@ -375,17 +474,27 @@ export default function ProductionStatusPage() {
         label: 'Start Shooting',
         icon: <PlayIcon className="w-4 h-4" />,
         variant: 'success',
-        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.SHOOTING }),
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStageV2.SHOOTING }),
       });
     }
 
     if (activeTab === 'shooting') {
       actions.push({
-        id: 'move-to-editing',
-        label: 'Move to Editing',
+        id: 'move-to-ready-for-edit',
+        label: 'Ready for Edit',
         variant: 'success',
         icon: <ArrowPathIcon className="w-4 h-4" />,
-        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.EDITING }),
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStageV2.READY_FOR_EDIT }),
+      });
+    }
+
+    if (activeTab === 'readyForEdit') {
+      actions.push({
+        id: 'move-to-editing',
+        label: 'Start Editing',
+        variant: 'success',
+        icon: <ArrowPathIcon className="w-4 h-4" />,
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStageV2.EDITING }),
       });
     }
 
@@ -395,17 +504,17 @@ export default function ProductionStatusPage() {
         label: 'Mark Ready',
         variant: 'success',
         icon: <CheckCircleIcon className="w-4 h-4" />,
-        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.READY_TO_POST }),
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStageV2.READY_TO_POST }),
       });
     }
 
-    if (activeTab === 'ready') {
+    if (activeTab === 'readyToPost') {
       actions.push({
         id: 'mark-posted',
         label: 'Mark Posted',
         variant: 'success',
         icon: <CheckCircleIcon className="w-4 h-4" />,
-        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStage.POSTED }),
+        onClick: () => bulkChangeStageListMutation.mutate({ ids: selectedIdArray, stage: ProductionStageV2.POSTED }),
       });
     }
 
@@ -426,6 +535,22 @@ export default function ProductionStatusPage() {
         onClick: () => bulkChangePriorityMutation.mutate({ ids: selectedIdArray, priority: Priority.HIGH }),
       });
     }
+
+    // Delete action (available on all tabs)
+    actions.push({
+      id: 'delete',
+      label: 'Delete',
+      icon: <TrashIcon className="w-4 h-4" />,
+      variant: 'danger',
+      onClick: () => {
+        const confirmed = window.confirm(
+          `Are you sure you want to delete ${selectedIdArray.length} project${selectedIdArray.length > 1 ? 's' : ''}? This action cannot be undone.`
+        );
+        if (confirmed) {
+          bulkDeleteMutation.mutate({ ids: selectedIdArray });
+        }
+      },
+    });
 
     return actions;
   };
@@ -455,15 +580,45 @@ export default function ProductionStatusPage() {
               </p>
             </div>
           </div>
-          <div className="relative" onClick={(e) => e.stopPropagation()}>
-            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by content ID, hook, team..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
-            />
+          <div className="flex flex-col sm:flex-row gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by content ID, title, profile, team..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+              />
+            </div>
+
+            {/* Profile Filter Dropdown */}
+            <select
+              value={profileFilter}
+              onChange={(e) => setProfileFilter(e.target.value)}
+              className={`px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 min-w-[140px] ${
+                profileFilter ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-700'
+              }`}
+            >
+              <option value="">All Profiles</option>
+              {uniqueProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Clear Filters Button - shows when profile filter is active */}
+            {profileFilter && (
+              <button
+                onClick={() => setProfileFilter('')}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition"
+                title="Clear filter"
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -569,11 +724,14 @@ export default function ProductionStatusPage() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   Content ID
                 </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Profile
+                </th>
                 <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   Ref
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[150px]">
-                  Hook
+                  Title
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   Stage
@@ -611,13 +769,20 @@ export default function ProductionStatusPage() {
               {currentData.map((project) => {
                 const daysInStage = getDaysInStage(project.updated_at);
                 let fileStatus;
+                let allFiles: ProductionFile[] = [];
 
                 if (activeTab === 'shooting') {
                   fileStatus = getFileStatus(project.id, 'raw-footage', project.deadline);
+                  allFiles = getFilesForProject(project.id, ['raw-footage']);
+                } else if (activeTab === 'readyForEdit') {
+                  fileStatus = getFileStatus(project.id, 'raw-footage', project.deadline);
+                  allFiles = getFilesForProject(project.id, ['raw-footage']);
                 } else if (activeTab === 'editing') {
                   fileStatus = getFileStatus(project.id, 'edited-video', project.deadline);
-                } else if (activeTab === 'ready') {
-                  fileStatus = getFileStatus(project.id, 'final-video', project.deadline);
+                  allFiles = getFilesForProject(project.id, ['raw-footage', 'edited-video']);
+                } else if (activeTab === 'readyToPost') {
+                  fileStatus = getFileStatus(project.id, 'edited-video', project.deadline);
+                  allFiles = getFilesForProject(project.id, ['raw-footage', 'edited-video']);
                 }
 
                 const rowIsSelected = isSelected(project.id);
@@ -646,6 +811,15 @@ export default function ProductionStatusPage() {
                     <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-primary-600">
                       {project.content_id || '-'}
                     </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-sm">
+                      {project.profile?.name ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                          {project.profile.name}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 whitespace-nowrap text-center">
                       {project.reference_url ? (
                         <a
@@ -664,7 +838,7 @@ export default function ProductionStatusPage() {
                     </td>
                     <td className="px-3 py-3 text-sm text-gray-900">
                       <div className="line-clamp-1 max-w-[180px]">
-                        {project.hook || 'No hook'}
+                        {project.title || project.hook || 'No title'}
                       </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
@@ -686,27 +860,37 @@ export default function ProductionStatusPage() {
                       </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-center">
-                      {fileStatus ? (
-                        <div className="flex items-center justify-center gap-1">
-                          <fileStatus.icon className={`w-4 h-4 ${fileStatus.color}`} />
-                          {fileStatus.file && (
-                            <div className="flex gap-0.5">
+                      {allFiles.length > 0 ? (
+                        <div className="flex items-center justify-center gap-2">
+                          {allFiles.map((file) => (
+                            <div key={file.id} className="flex items-center gap-0.5" title={`${file.file_type.replace(/-/g, ' ')}: ${file.file_name}`}>
+                              <span className={`text-xs font-medium ${
+                                file.file_type === 'raw-footage' ? 'text-indigo-600' :
+                                file.file_type === 'edited-video' ? 'text-purple-600' :
+                                'text-green-600'
+                              }`}>
+                                {file.file_type === 'raw-footage' ? 'R' : file.file_type === 'edited-video' ? 'E' : 'F'}
+                              </span>
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleViewFile(fileStatus.file!.file_url); }}
-                                className="p-1 hover:bg-gray-100 rounded"
-                                title="View"
+                                onClick={(e) => { e.stopPropagation(); handleViewFile(file.file_url); }}
+                                className="p-0.5 hover:bg-gray-100 rounded"
+                                title={`View ${file.file_type.replace(/-/g, ' ')}`}
                               >
                                 <EyeIcon className="w-3.5 h-3.5 text-gray-600" />
                               </button>
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleDownloadFile(fileStatus.file!.file_url, fileStatus.file!.file_name); }}
-                                className="p-1 hover:bg-gray-100 rounded"
-                                title="Download"
+                                onClick={(e) => { e.stopPropagation(); handleDownloadFile(file.file_url, file.file_name); }}
+                                className="p-0.5 hover:bg-gray-100 rounded"
+                                title={`Download ${file.file_type.replace(/-/g, ' ')}`}
                               >
                                 <ArrowDownTrayIcon className="w-3.5 h-3.5 text-gray-600" />
                               </button>
                             </div>
-                          )}
+                          ))}
+                        </div>
+                      ) : fileStatus ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <fileStatus.icon className={`w-4 h-4 ${fileStatus.color}`} />
                         </div>
                       ) : (
                         <span className="text-gray-400">-</span>
