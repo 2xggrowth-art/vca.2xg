@@ -6,7 +6,7 @@ import { productionFilesService } from '@/services/productionFilesService';
 import { videographerProjectService } from '@/services/videographerProjectService';
 import { videographerQueueService } from '@/services/videographerQueueService';
 import { contentConfigService } from '@/services/contentConfigService';
-import { VideoCameraIcon, ClockIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, UserGroupIcon, PlusIcon, ArrowPathIcon, InboxIcon, ChevronLeftIcon, ChevronRightIcon, ArrowPathRoundedSquareIcon, ForwardIcon } from '@heroicons/react/24/outline';
+import { VideoCameraIcon, ClockIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, UserGroupIcon, PlusIcon, ArrowPathIcon, InboxIcon, ChevronLeftIcon, ChevronRightIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline';
 import { CheckIcon } from '@heroicons/react/24/solid';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
@@ -80,6 +80,9 @@ export default function VideographerDashboard() {
   const [isReelViewerOpen, setIsReelViewerOpen] = useState(false);
   const [reelViewerIndex, setReelViewerIndex] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
+
+  // Rejected projects state (persisted in localStorage)
+  const [rejectedIds, setRejectedIds] = useState<string[]>(() => videographerQueueService.getRejectedProjectIds());
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -508,11 +511,14 @@ export default function VideographerDashboard() {
     });
   }, [myProjects, searchQuery, filterStage, filterPriority, castFilter]);
 
-  // Filtered available projects based on cast filter
+  // Filtered available projects based on cast filter and rejections
   const filteredAvailableProjects = useMemo(() => {
-    if (Object.keys(availableCastFilter).length === 0) return availableProjects;
-    return availableProjects.filter(project => matchesCastFilter(project, availableCastFilter));
-  }, [availableProjects, availableCastFilter]);
+    let projects = availableProjects.filter(p => !rejectedIds.includes(p.id));
+    if (Object.keys(availableCastFilter).length > 0) {
+      projects = projects.filter(project => matchesCastFilter(project, availableCastFilter));
+    }
+    return projects;
+  }, [availableProjects, availableCastFilter, rejectedIds]);
 
   // Check if any filters are active
   const hasActiveFilters = searchQuery || filterStage || filterPriority || Object.keys(castFilter).length > 0;
@@ -574,13 +580,22 @@ export default function VideographerDashboard() {
     handlePickProject(project);
   }, [filteredAvailableProjects, reelViewerIndex]);
 
-  const handleSkipReel = useCallback(() => {
-    if (reelViewerIndex < filteredAvailableProjects.length - 1) {
-      goToNextReel();
-    } else {
-      setIsReelViewerOpen(false);
+  const handleRejectReel = useCallback(() => {
+    const project = filteredAvailableProjects[reelViewerIndex];
+    if (project) {
+      videographerQueueService.rejectProject(project.id);
+      setRejectedIds(prev => [...prev, project.id]);
     }
-  }, [reelViewerIndex, filteredAvailableProjects.length, goToNextReel]);
+    // The rejected project gets filtered out, so the next project slides into the same index.
+    // If we were on the last item, step back or close.
+    const remainingAfterReject = filteredAvailableProjects.length - 1;
+    if (remainingAfterReject <= 0) {
+      setIsReelViewerOpen(false);
+    } else if (reelViewerIndex >= remainingAfterReject) {
+      setReelViewerIndex(remainingAfterReject - 1);
+    }
+    setIframeKey(prev => prev + 1);
+  }, [filteredAvailableProjects, reelViewerIndex]);
 
   // Swipe handling for mobile reel viewer
   const touchStartY = useRef<number>(0);
@@ -661,6 +676,24 @@ export default function VideographerDashboard() {
       <p className="text-sm text-gray-600">
         Pick a project to start shooting. Projects in the planning stage are waiting for a videographer.
       </p>
+
+      {/* Rejected projects info */}
+      {rejectedIds.length > 0 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-500">
+            {rejectedIds.length} rejected project{rejectedIds.length !== 1 ? 's' : ''} hidden
+          </span>
+          <button
+            onClick={() => {
+              videographerQueueService.clearAllRejections();
+              setRejectedIds([]);
+            }}
+            className="text-primary-600 hover:text-primary-700 font-medium underline"
+          >
+            Show all
+          </button>
+        </div>
+      )}
 
       {/* Active Cast Filters */}
       {hasAvailableFilters && (
@@ -1090,11 +1123,11 @@ export default function VideographerDashboard() {
               <div className="flex-shrink-0 bg-black px-4 py-3 pb-safe">
                 <div className="flex items-center justify-between max-w-sm mx-auto gap-3">
                   <button
-                    onClick={handleSkipReel}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-full bg-white/10 text-white active:bg-white/20 transition-all"
+                    onClick={handleRejectReel}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-full bg-red-500/20 text-red-400 active:bg-red-500 active:text-white transition-all"
                   >
-                    <ForwardIcon className="h-5 w-5" />
-                    <span className="font-medium">Skip</span>
+                    <XMarkIcon className="h-5 w-5" />
+                    <span className="font-medium">Reject</span>
                   </button>
 
                   <button
@@ -1239,11 +1272,11 @@ export default function VideographerDashboard() {
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
                 <div className="flex items-center gap-6">
                   <button
-                    onClick={handleSkipReel}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-full border-2 border-white/40 text-white/80 hover:bg-white/10 hover:text-white transition-all"
+                    onClick={handleRejectReel}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-full border-2 border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-all"
                   >
-                    <ForwardIcon className="h-5 w-5" />
-                    <span className="font-medium">Skip</span>
+                    <XMarkIcon className="h-5 w-5" />
+                    <span className="font-medium">Reject</span>
                   </button>
 
                   {/* Navigation dots */}

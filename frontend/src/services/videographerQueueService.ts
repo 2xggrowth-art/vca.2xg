@@ -359,4 +359,34 @@ export const videographerQueueService = {
       posting_manager: project.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
     }));
   },
+
+  /**
+   * Reject a project - hides it from this videographer's available list
+   * Stored in localStorage keyed by user ID for persistence
+   */
+  getRejectedProjectIds(): string[] {
+    try {
+      const raw = localStorage.getItem('videographer_rejected_projects');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  rejectProject(analysisId: string): void {
+    const rejected = this.getRejectedProjectIds();
+    if (!rejected.includes(analysisId)) {
+      rejected.push(analysisId);
+      localStorage.setItem('videographer_rejected_projects', JSON.stringify(rejected));
+    }
+  },
+
+  unrejectProject(analysisId: string): void {
+    const rejected = this.getRejectedProjectIds().filter(id => id !== analysisId);
+    localStorage.setItem('videographer_rejected_projects', JSON.stringify(rejected));
+  },
+
+  clearAllRejections(): void {
+    localStorage.removeItem('videographer_rejected_projects');
+  },
 };
