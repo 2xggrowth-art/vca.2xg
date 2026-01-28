@@ -7,8 +7,22 @@ import {
   LinkIcon,
   PlayIcon,
 } from '@heroicons/react/24/outline';
-import type { ViralAnalysis } from '@/types';
+import type { ViralAnalysis, CastComposition } from '@/types';
 import { ProductionStageLabels, ProductionStageColors } from '@/types';
+
+const getCastSummaryParts = (cast: CastComposition): string[] => {
+  const parts: string[] = [];
+  if (cast.man) parts.push(`${cast.man} Men`);
+  if (cast.woman) parts.push(`${cast.woman} Women`);
+  if (cast.boy) parts.push(`${cast.boy} Boys`);
+  if (cast.girl) parts.push(`${cast.girl} Girls`);
+  if (cast.teen_boy) parts.push(`${cast.teen_boy} Teen Boys`);
+  if (cast.teen_girl) parts.push(`${cast.teen_girl} Teen Girls`);
+  if (cast.senior_man) parts.push(`${cast.senior_man} Sr. Men`);
+  if (cast.senior_woman) parts.push(`${cast.senior_woman} Sr. Women`);
+  if (cast.include_owner) parts.push('+ Owner');
+  return parts;
+};
 
 interface ProjectCardProps {
   project: ViralAnalysis;
@@ -188,6 +202,28 @@ export default function ProjectCard({
           </div>
         )}
       </div>
+
+      {/* Cast Composition Summary */}
+      {project.cast_composition && (project.cast_composition as CastComposition).total > 0 && (
+        <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <UserGroupIcon className="w-4 h-4 text-amber-600" />
+            <span className="text-xs font-semibold text-amber-800">
+              Cast: {(project.cast_composition as CastComposition).total} people
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {getCastSummaryParts(project.cast_composition as CastComposition).map((part) => (
+              <span
+                key={part}
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"
+              >
+                {part}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Profile & Tags */}
       {(project.profile || project.hook_tags?.length || project.character_tags?.length) && (

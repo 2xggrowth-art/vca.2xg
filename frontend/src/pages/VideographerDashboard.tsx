@@ -1106,6 +1106,24 @@ export default function VideographerDashboard() {
                   )}
                 </div>
 
+                {/* Left/Right navigation arrows */}
+                {reelViewerIndex > 0 && (
+                  <button
+                    onClick={goToPrevReel}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 text-white active:bg-black/60 transition-all"
+                  >
+                    <ChevronLeftIcon className="h-5 w-5" />
+                  </button>
+                )}
+                {reelViewerIndex < filteredAvailableProjects.length - 1 && (
+                  <button
+                    onClick={goToNextReel}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 text-white active:bg-black/60 transition-all"
+                  >
+                    <ChevronRightIcon className="h-5 w-5" />
+                  </button>
+                )}
+
                 {/* Bottom overlay */}
                 <div className="absolute bottom-0 left-0 right-0 h-[130px] bg-black z-10" />
 
