@@ -4,8 +4,10 @@ import { assignmentService } from '@/services/assignmentService';
 import { productionFilesService } from '@/services/productionFilesService';
 import { editorQueueService } from '@/services/editorQueueService';
 import { FilmIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, ArrowDownTrayIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, ArrowPathIcon, InboxIcon, FolderOpenIcon } from '@heroicons/react/24/outline';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import JSZip from 'jszip';
+import { googleDriveOAuthService } from '@/services/googleDriveOAuthService';
 import type { ViralAnalysis, UpdateProductionStageData, ProductionFile } from '@/types';
 import { UserRole, ProductionStageV2 } from '@/types';
 import MultiFileUploadQueue, { EDITOR_FILE_TYPES } from '@/components/MultiFileUploadQueue';
@@ -28,6 +30,54 @@ export default function EditorDashboard() {
 
   // File upload state
   const [showFileForm, setShowFileForm] = useState(false);
+
+  // Zip download state
+  const [isZipping, setIsZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState('');
+
+  const handleDownloadAllAsZip = useCallback(async (files: ProductionFile[], projectName: string) => {
+    if (isZipping || files.length === 0) return;
+
+    try {
+      setIsZipping(true);
+      setZipProgress(`Preparing 0/${files.length} files...`);
+      const zip = new JSZip();
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setZipProgress(`Downloading ${i + 1}/${files.length}: ${file.file_name}`);
+
+        try {
+          const blob = await googleDriveOAuthService.downloadFileAsBlob(file.file_id);
+          zip.file(file.file_name, blob);
+        } catch (err) {
+          console.error(`Failed to download ${file.file_name}:`, err);
+          toast.error(`Failed to download: ${file.file_name}`);
+        }
+      }
+
+      setZipProgress('Creating zip...');
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+      // Trigger download
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectName || 'raw-footage'}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success('Zip downloaded successfully!');
+    } catch (err) {
+      console.error('Zip download failed:', err);
+      toast.error('Failed to create zip. Try downloading files individually.');
+    } finally {
+      setIsZipping(false);
+      setZipProgress('');
+    }
+  }, [isZipping]);
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -723,15 +773,27 @@ export default function EditorDashboard() {
                       </div>
                       {rawFootageFiles.length > 1 && (
                         <button
-                          onClick={() => {
-                            rawFootageFiles.forEach((file: ProductionFile) => {
-                              window.open(file.file_url, '_blank');
-                            });
-                          }}
-                          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition"
+                          onClick={() => handleDownloadAllAsZip(
+                            rawFootageFiles,
+                            selectedAnalysis?.content_id || selectedAnalysis?.id?.slice(0, 8) || 'raw-footage'
+                          )}
+                          disabled={isZipping}
+                          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait text-sm font-medium transition"
                         >
-                          <ArrowDownTrayIcon className="w-4 h-4 mr-1.5" />
-                          Download All ({rawFootageFiles.length})
+                          {isZipping ? (
+                            <>
+                              <svg className="animate-spin w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              {zipProgress || 'Zipping...'}
+                            </>
+                          ) : (
+                            <>
+                              <ArrowDownTrayIcon className="w-4 h-4 mr-1.5" />
+                              Download All as Zip ({rawFootageFiles.length})
+                            </>
+                          )}
                         </button>
                       )}
                     </div>

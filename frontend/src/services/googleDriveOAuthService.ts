@@ -401,7 +401,10 @@ class GoogleDriveOAuthService {
         xhr.send(formData);
       });
 
-      // Auto-share file with admin if email is configured
+      // Make file publicly viewable (anyone with the link can view)
+      await this.makeFilePublic(result.fileId);
+
+      // Also share with admin if email is configured
       if (ADMIN_EMAIL) {
         await this.shareFileWithEmail(result.fileId, ADMIN_EMAIL, 'reader');
       }
@@ -410,6 +413,32 @@ class GoogleDriveOAuthService {
     } catch (error: any) {
       console.error('❌ Upload error:', error);
       throw new Error(`Failed to upload file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Make file publicly viewable (anyone with the link can view)
+   */
+  async makeFilePublic(fileId: string): Promise<void> {
+    await this.ensureSignedIn();
+
+    try {
+      await gapi.client.drive.permissions.create({
+        fileId: fileId,
+        resource: {
+          type: 'anyone',
+          role: 'reader',
+        },
+      });
+      console.log(`✅ Made file ${fileId} publicly viewable`);
+    } catch (error: any) {
+      console.error('❌ Make public error:', error);
+      // Log full error details for debugging
+      if (error.result) {
+        console.error('Error details:', error.result.error);
+      }
+      // Don't throw - public sharing failure shouldn't block the upload
+      console.warn(`Failed to make file public, but upload succeeded`);
     }
   }
 
@@ -493,6 +522,25 @@ class GoogleDriveOAuthService {
     if (!signedIn) {
       await this.signIn();
     }
+  }
+
+  /**
+   * Download a file from Google Drive as a Blob using the Drive API
+   */
+  async downloadFileAsBlob(fileId: string): Promise<Blob> {
+    await this.ensureSignedIn();
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+        },
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to download file ${fileId}: ${response.statusText}`);
+    }
+    return response.blob();
   }
 }
 
