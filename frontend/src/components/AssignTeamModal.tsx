@@ -16,6 +16,11 @@ import {
   UsersIcon,
   ChartBarIcon,
   ChatBubbleBottomCenterTextIcon,
+  PlusIcon,
+  CheckCircleIcon,
+  PencilIcon,
+  TrashIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 
 interface AssignTeamModalProps {
@@ -41,9 +46,9 @@ export default function AssignTeamModal({
     videographerId: analysis.videographer?.id,
     editorId: analysis.editor?.id,
     postingManagerId: analysis.posting_manager?.id,
-    // Auto-assign all roles by default
+    // Auto-assign videographer and posting manager only; editors self-pick from queue
     autoAssignVideographer: !analysis.videographer?.id,
-    autoAssignEditor: !analysis.editor?.id,
+    autoAssignEditor: false,
     autoAssignPostingManager: !analysis.posting_manager?.id,
     // Production Details
     industryId: analysis.industry_id || '',
@@ -63,11 +68,11 @@ export default function AssignTeamModal({
         videographerId: analysis.videographer?.id,
         editorId: analysis.editor?.id,
         postingManagerId: analysis.posting_manager?.id,
-        // Auto-assign all roles by default
+        // Auto-assign videographer and posting manager only; editors self-pick from queue
         autoAssignVideographer: !analysis.videographer?.id,
-        autoAssignEditor: !analysis.editor?.id,
+        autoAssignEditor: false,
         autoAssignPostingManager: !analysis.posting_manager?.id,
-        // Production Details
+        // Production Details - industryId will be auto-set when industries load
         industryId: analysis.industry_id || '',
         profileId: analysis.profile_id || '',
         hookTagIds: analysis.hook_tags?.map(t => t.id) || [],
@@ -124,6 +129,113 @@ export default function AssignTeamModal({
     enabled: isOpen,
   });
 
+  // Auto-set industry to BCH when industries are loaded
+  useEffect(() => {
+    if (industries.length > 0 && !formData.industryId) {
+      const bchIndustry = industries.find((i: any) => i.short_code === 'BCH');
+      if (bchIndustry) {
+        setFormData(prev => ({ ...prev, industryId: bchIndustry.id }));
+      }
+    }
+  }, [industries, formData.industryId]);
+
+  // State for new profile input
+  const [newProfileName, setNewProfileName] = useState('');
+  const [isAddingProfile, setIsAddingProfile] = useState(false);
+  // State for profile editing/deleting
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingProfileName, setEditingProfileName] = useState('');
+  const [confirmDeleteProfileId, setConfirmDeleteProfileId] = useState<string | null>(null);
+  const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
+
+  // Mutation for creating new profiles
+  const createProfileMutation = useMutation({
+    mutationFn: (name: string) => contentConfigService.createProfile({ name }),
+    onSuccess: (newProfile) => {
+      queryClient.invalidateQueries({ queryKey: ['profile-list'] });
+      setFormData(prev => ({ ...prev, profileId: newProfile.id }));
+      setNewProfileName('');
+      setIsAddingProfile(false);
+      toast.success(`Profile "${newProfile.name}" created!`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to create profile');
+    },
+  });
+
+  // Mutation for updating profiles
+  const updateProfileMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateProfile(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile-list'] });
+      toast.success('Profile updated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update profile');
+    },
+  });
+
+  // Mutation for deleting profiles
+  const deleteProfileMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteProfile(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile-list'] });
+      toast.success('Profile deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete profile');
+    },
+  });
+
+  // Mutations for managing hook tags
+  const updateHookTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateHookTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag updated');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update hook tag');
+    },
+  });
+
+  const deleteHookTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteHookTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag deleted');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete hook tag');
+    },
+  });
+
+  // Mutations for managing character tags
+  const updateCharacterTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateCharacterTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag updated');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update character tag');
+    },
+  });
+
+  const deleteCharacterTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteCharacterTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag deleted');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete character tag');
+    },
+  });
+
   // Assignment mutation
   const assignMutation = useMutation({
     mutationFn: (data: AssignTeamData) =>
@@ -132,8 +244,10 @@ export default function AssignTeamModal({
       queryClient.invalidateQueries({ queryKey: ['analyses'] });
       queryClient.invalidateQueries({ queryKey: ['analysis', analysis.id] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'pending-scripts'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'approved-scripts'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'production-all'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'production-status'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'pending-count'] });
       toast.success('Team assigned and production details saved!');
       onClose();
     },
@@ -148,7 +262,8 @@ export default function AssignTeamModal({
     // Validate all mandatory production details
     const missingFields: string[] = [];
 
-    if (!formData.industryId) missingFields.push('Industry');
+    // Industry is auto-set to BCH, but validate it exists
+    if (!formData.industryId) missingFields.push('Industry (BCH not found)');
     if (!formData.profileId) missingFields.push('Profile');
     if (!formData.hookTagIds || formData.hookTagIds.length === 0) missingFields.push('Hook Tags');
     if (!formData.characterTagIds || formData.characterTagIds.length === 0) missingFields.push('Character Tags');
@@ -244,53 +359,240 @@ export default function AssignTeamModal({
                 </p>
               </div>
 
-              {/* Industry & Profile */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    <BuildingOfficeIcon className="w-4 h-4 inline mr-1 text-gray-500" />
-                    Industry <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.industryId || ''}
-                    onChange={(e) => setFormData({ ...formData, industryId: e.target.value })}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition bg-white text-sm ${
-                      !formData.industryId ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="">Select industry...</option>
-                    {industries
-                      .filter((i: any) => i.is_active)
-                      .map((industry: any) => (
-                        <option key={industry.id} value={industry.id}>
-                          {industry.name} ({industry.short_code})
-                        </option>
-                      ))}
-                  </select>
+              {/* Industry - Fixed to BCH (hidden but auto-set) */}
+              <div className="bg-blue-50 rounded-lg p-3 border border-blue-200 mb-4">
+                <div className="flex items-center text-sm text-blue-700">
+                  <CheckCircleIcon className="w-4 h-4 mr-2" />
+                  <span className="font-medium">Industry:</span>
+                  <span className="ml-2">Bicycle Shop (BCH)</span>
+                </div>
+              </div>
+
+              {/* Profile / Admin - Tag Style Selection */}
+              <div className={`rounded-lg p-4 border mb-4 ${
+                !formData.profileId ? 'bg-red-50 border-red-200' : 'bg-indigo-50 border-indigo-200'
+              }`}>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <UserGroupIcon className="w-4 h-4 inline mr-1 text-gray-500" />
+                  Profile / Admin <span className="text-red-500">*</span>
+                </label>
+
+                {/* Profile Tags */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {profiles
+                    .filter((p: any) => p.is_active)
+                    .map((profile: any) => {
+                      const isSelected = formData.profileId === profile.id;
+                      const isEditing = editingProfileId === profile.id;
+                      const isConfirmingDelete = confirmDeleteProfileId === profile.id;
+                      const isHovered = hoveredProfileId === profile.id;
+
+                      if (isEditing) {
+                        return (
+                          <div key={profile.id} className="flex items-center gap-1 bg-yellow-50 px-2 py-1 rounded-full border border-yellow-400">
+                            <input
+                              type="text"
+                              value={editingProfileName}
+                              onChange={(e) => setEditingProfileName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && editingProfileName.trim()) {
+                                  e.preventDefault();
+                                  updateProfileMutation.mutate({ id: profile.id, name: editingProfileName.trim() });
+                                  setEditingProfileId(null);
+                                  setEditingProfileName('');
+                                } else if (e.key === 'Escape') {
+                                  setEditingProfileId(null);
+                                  setEditingProfileName('');
+                                }
+                              }}
+                              className="w-24 px-1 py-0.5 text-sm border-0 bg-transparent focus:ring-0"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (editingProfileName.trim()) {
+                                  updateProfileMutation.mutate({ id: profile.id, name: editingProfileName.trim() });
+                                }
+                                setEditingProfileId(null);
+                                setEditingProfileName('');
+                              }}
+                              className="p-0.5 text-green-600 hover:bg-green-100 rounded"
+                            >
+                              <CheckCircleIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingProfileId(null);
+                                setEditingProfileName('');
+                              }}
+                              className="p-0.5 text-gray-500 hover:bg-gray-100 rounded"
+                            >
+                              <XMarkIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      if (isConfirmingDelete) {
+                        return (
+                          <div key={profile.id} className="flex items-center gap-1 bg-red-50 px-2 py-1 rounded-full border border-red-300">
+                            <span className="text-xs text-red-700">Delete?</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deleteProfileMutation.mutate(profile.id);
+                                if (formData.profileId === profile.id) {
+                                  setFormData(prev => ({ ...prev, profileId: '' }));
+                                }
+                                setConfirmDeleteProfileId(null);
+                              }}
+                              className="px-1.5 py-0.5 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteProfileId(null)}
+                              className="px-1.5 py-0.5 text-xs font-medium text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                              No
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={profile.id}
+                          className="relative group"
+                          onMouseEnter={() => setHoveredProfileId(profile.id)}
+                          onMouseLeave={() => setHoveredProfileId(null)}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, profileId: profile.id }))}
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white ring-2 ring-indigo-300'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:border-indigo-400'
+                            } ${isHovered ? 'pr-8' : ''}`}
+                          >
+                            {isSelected && <CheckCircleIcon className="w-4 h-4 inline mr-1" />}
+                            {profile.name}
+                          </button>
+
+                          {/* Hover dropdown button */}
+                          {isHovered && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHoveredProfileId(profile.id === hoveredProfileId ? null : profile.id);
+                              }}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded transition-colors"
+                              title="Manage profile"
+                            >
+                              <ChevronDownIcon className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {/* Hover dropdown menu */}
+                          {isHovered && (
+                            <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 min-w-[100px]">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProfileId(profile.id);
+                                  setEditingProfileName(profile.name);
+                                  setHoveredProfileId(null);
+                                }}
+                                className="w-full flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                              >
+                                <PencilIcon className="w-4 h-4 mr-2" />
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDeleteProfileId(profile.id);
+                                  setHoveredProfileId(null);
+                                }}
+                                className="w-full flex items-center px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                              >
+                                <TrashIcon className="w-4 h-4 mr-2" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                  {/* Add New Profile Button */}
+                  {!isAddingProfile && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingProfile(true)}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 border border-dashed border-gray-400 transition-all flex items-center"
+                    >
+                      <PlusIcon className="w-4 h-4 mr-1" />
+                      Add New
+                    </button>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    <UserGroupIcon className="w-4 h-4 inline mr-1 text-gray-500" />
-                    Profile / Admin <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.profileId || ''}
-                    onChange={(e) => setFormData({ ...formData, profileId: e.target.value })}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition bg-white text-sm ${
-                      !formData.profileId ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="">Select profile...</option>
-                    {profiles
-                      .filter((p: any) => p.is_active)
-                      .map((profile: any) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
+                {/* New Profile Input */}
+                {isAddingProfile && (
+                  <div className="flex gap-2 items-center bg-white p-2 rounded-lg border border-indigo-300">
+                    <input
+                      type="text"
+                      value={newProfileName}
+                      onChange={(e) => setNewProfileName(e.target.value)}
+                      placeholder="Enter new profile name..."
+                      className="flex-1 px-3 py-1.5 text-sm border-0 focus:ring-0 focus:outline-none"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newProfileName.trim()) {
+                          e.preventDefault();
+                          createProfileMutation.mutate(newProfileName.trim());
+                        } else if (e.key === 'Escape') {
+                          setIsAddingProfile(false);
+                          setNewProfileName('');
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newProfileName.trim()) {
+                          createProfileMutation.mutate(newProfileName.trim());
+                        }
+                      }}
+                      disabled={!newProfileName.trim() || createProfileMutation.isPending}
+                      className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {createProfileMutation.isPending ? 'Adding...' : 'Add'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingProfile(false);
+                        setNewProfileName('');
+                      }}
+                      className="px-2 py-1.5 text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+
+                <p className="mt-2 text-xs text-gray-500">
+                  Select a profile or click "Add New" to create a new one
+                </p>
               </div>
 
               {/* Hook Tags */}
@@ -309,6 +611,9 @@ export default function AssignTeamModal({
                   onAddCustomTag={(tagName) => {
                     console.log('Custom hook tag added:', tagName);
                   }}
+                  allowManage={true}
+                  onEditTag={(id, newName) => updateHookTagMutation.mutate({ id, name: newName })}
+                  onDeleteTag={(id) => deleteHookTagMutation.mutate(id)}
                 />
                 <p className="mt-1.5 text-xs text-gray-500">
                   Select hook types or type and press Enter to create custom tags
@@ -331,6 +636,9 @@ export default function AssignTeamModal({
                   onAddCustomTag={(tagName) => {
                     console.log('Custom character tag added:', tagName);
                   }}
+                  allowManage={true}
+                  onEditTag={(id, newName) => updateCharacterTagMutation.mutate({ id, name: newName })}
+                  onDeleteTag={(id) => deleteCharacterTagMutation.mutate(id)}
                 />
                 <p className="mt-1.5 text-xs text-gray-500">
                   Who will appear in the video? Type and press Enter to add custom characters
@@ -345,11 +653,20 @@ export default function AssignTeamModal({
                     Total People Involved <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={formData.totalPeopleInvolved || 1}
-                    onChange={(e) => setFormData({ ...formData, totalPeopleInvolved: parseInt(e.target.value) || 1 })}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Enter number"
+                    value={formData.totalPeopleInvolved ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val === '') {
+                        setFormData({ ...formData, totalPeopleInvolved: undefined });
+                      } else {
+                        const num = parseInt(val);
+                        setFormData({ ...formData, totalPeopleInvolved: Math.min(Math.max(num, 1), 50) });
+                      }
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition text-sm"
                   />
                   <p className="mt-1 text-xs text-gray-500">
