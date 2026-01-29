@@ -58,6 +58,7 @@ export default function EditorDashboard() {
       const zip = new JSZip();
 
       // Download files in parallel batches of 3 for speed
+      // Each file is added to the zip immediately after download to reduce peak memory
       const MAX_CONCURRENT = 3;
       let completedCount = 0;
       const queue = [...files];
@@ -66,8 +67,9 @@ export default function EditorDashboard() {
         const file = queue.shift();
         if (!file) return;
 
+        const fileNum = ++completedCount;
         try {
-          setZipProgress(`Downloading ${completedCount + 1}/${files.length}: ${file.file_name}`);
+          setZipProgress(`Downloading ${fileNum}/${files.length}: ${file.file_name}`);
           const blob = await googleDriveOAuthService.downloadFileAsBlob(file.file_id);
           zip.file(file.file_name, blob);
         } catch (err) {
@@ -75,7 +77,6 @@ export default function EditorDashboard() {
           toast.error(`Failed to download: ${file.file_name}`);
         }
 
-        completedCount++;
         // Process next file from queue
         await downloadNext();
       };
@@ -88,7 +89,12 @@ export default function EditorDashboard() {
       await Promise.all(workers);
 
       setZipProgress('Creating zip...');
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      // Use streamFiles to reduce memory usage during zip generation
+      const zipBlob = await zip.generateAsync({
+        type: 'blob',
+        streamFiles: true,
+        compression: 'STORE', // No compression for video files (already compressed, saves CPU)
+      });
 
       // Trigger download
       const url = URL.createObjectURL(zipBlob);

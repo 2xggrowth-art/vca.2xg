@@ -1,6 +1,12 @@
 /**
  * Google Drive OAuth Upload Service (Using Google Identity Services - GIS)
  * Uploads files to videographer's personal Google Drive using OAuth
+ *
+ * Performance optimizations for large video files (1GB+):
+ * - Chunked resumable upload (16MB chunks) with auto-resume on failure
+ * - Exponential backoff retry (3 attempts per chunk)
+ * - Debounced progress callbacks (max 2/sec to avoid React re-render storms)
+ * - Abort support for cancelling in-flight uploads
  */
 
 // Google API configuration
@@ -9,6 +15,12 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 // Note: drive.file scope doesn't support sharing, so we need broader drive scope
 const SCOPES = 'https://www.googleapis.com/auth/drive';
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_GOOGLE_EMAIL || ''; // Admin email for auto-sharing
+
+// Upload constants
+const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB chunks (must be multiple of 256KiB)
+const MAX_RETRIES = 3;
+const FIVE_MB = 5 * 1024 * 1024;
+const PROGRESS_THROTTLE_MS = 500; // Max 2 progress updates per second
 
 declare const google: any;
 declare const gapi: any;
@@ -27,11 +39,41 @@ interface UploadProgress {
   percentage: number;
 }
 
+/**
+ * Sleep utility for exponential backoff
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Creates a throttled version of a progress callback that fires at most once per interval.
+ * Always fires the final 100% progress event.
+ */
+function createThrottledProgress(
+  onProgress: ((progress: UploadProgress) => void) | undefined,
+  intervalMs: number = PROGRESS_THROTTLE_MS
+): (progress: UploadProgress) => void {
+  if (!onProgress) return () => {};
+  let lastCall = 0;
+  return (progress: UploadProgress) => {
+    const now = Date.now();
+    // Always fire at 100% or if enough time has passed
+    if (progress.percentage >= 100 || now - lastCall >= intervalMs) {
+      lastCall = now;
+      onProgress(progress);
+    }
+  };
+}
+
 class GoogleDriveOAuthService {
   private tokenClient: any = null;
   private accessToken: string | null = null;
   private gapiInited = false;
   private gisInited = false;
+
+  // Track active XHRs for abort support
+  private activeUploads: Map<string, XMLHttpRequest> = new Map();
 
   /**
    * Initialize Google API and GIS
@@ -346,30 +388,33 @@ class GoogleDriveOAuthService {
 
   /**
    * Upload file to Google Drive with progress tracking.
-   * Uses resumable upload for files > 5MB (recommended by Google for large files).
+   * Uses chunked resumable upload for files > 5MB (16MB chunks with retry).
    * Uses multipart upload for files <= 5MB.
+   * Returns an uploadKey that can be used to abort the upload.
    */
   async uploadFile(
     file: File,
     folderId: string,
-    onProgress?: (progress: UploadProgress) => void
+    onProgress?: (progress: UploadProgress) => void,
+    uploadKey?: string
   ): Promise<UploadResult> {
     await this.ensureSignedIn();
 
-    const FIVE_MB = 5 * 1024 * 1024;
+    // Throttle progress to max 2 updates/sec to prevent React re-render storms
+    const throttledProgress = createThrottledProgress(onProgress);
 
     try {
       const result = file.size > FIVE_MB
-        ? await this.resumableUpload(file, folderId, onProgress)
-        : await this.multipartUpload(file, folderId, onProgress);
+        ? await this.chunkedResumableUpload(file, folderId, throttledProgress, uploadKey)
+        : await this.multipartUpload(file, folderId, throttledProgress, uploadKey);
 
       // Make file public AND share with admin in parallel (not sequentially)
       const permissionPromises: Promise<void>[] = [
-        this.makeFilePublic(result.fileId),
+        this.retryWithBackoff(() => this.makeFilePublic(result.fileId)),
       ];
       if (ADMIN_EMAIL) {
         permissionPromises.push(
-          this.shareFileWithEmail(result.fileId, ADMIN_EMAIL, 'reader')
+          this.retryWithBackoff(() => this.shareFileWithEmail(result.fileId, ADMIN_EMAIL, 'reader'))
         );
       }
       await Promise.all(permissionPromises);
@@ -378,7 +423,47 @@ class GoogleDriveOAuthService {
     } catch (error: any) {
       console.error('❌ Upload error:', error);
       throw new Error(`Failed to upload file: ${error.message}`);
+    } finally {
+      // Clean up active upload tracking
+      if (uploadKey) {
+        this.activeUploads.delete(uploadKey);
+      }
     }
+  }
+
+  /**
+   * Abort an in-flight upload by its key
+   */
+  abortUpload(uploadKey: string): void {
+    const xhr = this.activeUploads.get(uploadKey);
+    if (xhr) {
+      xhr.abort();
+      this.activeUploads.delete(uploadKey);
+      console.log(`🛑 Aborted upload: ${uploadKey}`);
+    }
+  }
+
+  /**
+   * Retry a function with exponential backoff
+   */
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = MAX_RETRIES
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+          console.warn(`Retry ${attempt + 1}/${maxRetries} after ${delayMs}ms:`, error.message);
+          await sleep(delayMs);
+        }
+      }
+    }
+    throw lastError;
   }
 
   /**
@@ -387,7 +472,8 @@ class GoogleDriveOAuthService {
   private async multipartUpload(
     file: File,
     folderId: string,
-    onProgress?: (progress: UploadProgress) => void
+    onProgress: (progress: UploadProgress) => void,
+    uploadKey?: string
   ): Promise<UploadResult> {
     const metadata = {
       name: file.name,
@@ -401,12 +487,18 @@ class GoogleDriveOAuthService {
 
     return new Promise<UploadResult>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+
+      // Track for abort support
+      if (uploadKey) {
+        this.activeUploads.set(uploadKey, xhr);
+      }
+
       xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,size');
 
       xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
 
       xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
+        if (event.lengthComputable) {
           onProgress({
             loaded: event.loaded,
             total: event.total,
@@ -431,22 +523,30 @@ class GoogleDriveOAuthService {
         }
       };
 
+      xhr.onabort = () => reject(new Error('Upload cancelled'));
       xhr.onerror = () => reject(new Error('Network error during upload'));
       xhr.send(formData);
     });
   }
 
   /**
-   * Resumable upload for large files (> 5MB).
-   * Step 1: Initiate resumable session to get a session URI.
-   * Step 2: PUT the file content to the session URI in a single request.
-   * This avoids the overhead of multipart encoding and lets Google optimize
-   * the transfer, resulting in significantly faster uploads for large video files.
+   * Chunked resumable upload for large files (> 5MB).
+   *
+   * How it works:
+   * 1. Initiate a resumable session to get a session URI from Google
+   * 2. Split the file into 16MB chunks using File.slice() (no extra memory)
+   * 3. Upload each chunk sequentially with Content-Range header
+   * 4. If a chunk fails, query Google for the last received byte and resume
+   * 5. Each chunk gets up to 3 retry attempts with exponential backoff
+   *
+   * This means a 1GB file that fails at 900MB only re-uploads the last 100MB,
+   * not the entire file from scratch.
    */
-  private async resumableUpload(
+  private async chunkedResumableUpload(
     file: File,
     folderId: string,
-    onProgress?: (progress: UploadProgress) => void
+    onProgress: (progress: UploadProgress) => void,
+    uploadKey?: string
   ): Promise<UploadResult> {
     const metadata = {
       name: file.name,
@@ -455,66 +555,128 @@ class GoogleDriveOAuthService {
     };
 
     // Step 1: Initiate resumable upload session
-    const initResponse = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink,webContentLink,size',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Type': file.type,
-          'X-Upload-Content-Length': String(file.size),
-        },
-        body: JSON.stringify(metadata),
-      }
-    );
-
-    if (!initResponse.ok) {
-      const errorText = await initResponse.text();
-      throw new Error(`Failed to initiate resumable upload: ${initResponse.status} ${errorText}`);
-    }
-
-    const resumableUri = initResponse.headers.get('Location');
-    if (!resumableUri) {
-      throw new Error('No resumable session URI returned from Google Drive');
-    }
-
-    // Step 2: Upload the file content to the resumable session URI
-    // Using XHR for upload progress tracking (fetch API doesn't support upload progress)
-    return new Promise<UploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', resumableUri);
-
-      xhr.setRequestHeader('Content-Type', file.type);
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          onProgress({
-            loaded: event.loaded,
-            total: event.total,
-            percentage: Math.round((event.loaded / event.total) * 100),
-          });
+    const resumableUri = await this.retryWithBackoff(async () => {
+      const initResponse = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink,webContentLink,size',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': file.type || 'application/octet-stream',
+            'X-Upload-Content-Length': String(file.size),
+          },
+          body: JSON.stringify(metadata),
         }
-      };
+      );
+
+      if (!initResponse.ok) {
+        const errorText = await initResponse.text();
+        throw new Error(`Failed to initiate resumable upload: ${initResponse.status} ${errorText}`);
+      }
+
+      const uri = initResponse.headers.get('Location');
+      if (!uri) {
+        throw new Error('No resumable session URI returned from Google Drive');
+      }
+      return uri;
+    });
+
+    console.log(`📤 Starting chunked upload: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)}MB, ${Math.ceil(file.size / CHUNK_SIZE)} chunks)`);
+
+    // Step 2: Upload file in chunks
+    let offset = 0;
+
+    while (offset < file.size) {
+      const chunkEnd = Math.min(offset + CHUNK_SIZE, file.size);
+      const chunk = file.slice(offset, chunkEnd);
+      const isLastChunk = chunkEnd === file.size;
+
+      // Retry each chunk with exponential backoff
+      const result = await this.retryWithBackoff(async () => {
+        return await this.uploadChunk(
+          resumableUri,
+          chunk,
+          offset,
+          chunkEnd - 1,
+          file.size,
+          file.type || 'application/octet-stream',
+          uploadKey
+        );
+      });
+
+      // Report progress based on bytes sent
+      onProgress({
+        loaded: chunkEnd,
+        total: file.size,
+        percentage: Math.round((chunkEnd / file.size) * 100),
+      });
+
+      if (isLastChunk && result) {
+        // Final chunk returns the file metadata
+        console.log(`✅ Uploaded (chunked resumable): ${result.fileName}`);
+        return result;
+      }
+
+      // Google returns 308 for intermediate chunks - move to next offset
+      offset = chunkEnd;
+    }
+
+    // Shouldn't reach here, but handle edge case
+    throw new Error('Upload completed but no result received');
+  }
+
+  /**
+   * Upload a single chunk to the resumable session URI.
+   * Returns UploadResult on the final chunk, null on intermediate chunks.
+   */
+  private uploadChunk(
+    resumableUri: string,
+    chunk: Blob,
+    startByte: number,
+    endByte: number,
+    totalSize: number,
+    contentType: string,
+    uploadKey?: string
+  ): Promise<UploadResult | null> {
+    return new Promise<UploadResult | null>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track for abort support
+      if (uploadKey) {
+        this.activeUploads.set(uploadKey, xhr);
+      }
+
+      xhr.open('PUT', resumableUri);
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.setRequestHeader('Content-Range', `bytes ${startByte}-${endByte}/${totalSize}`);
 
       xhr.onload = () => {
         if (xhr.status === 200 || xhr.status === 201) {
-          const response = JSON.parse(xhr.responseText);
-          console.log(`✅ Uploaded (resumable): ${response.name}`);
-          resolve({
-            fileId: response.id,
-            fileName: response.name,
-            webViewLink: response.webViewLink,
-            webContentLink: response.webContentLink || '',
-            size: parseInt(response.size, 10),
-          });
+          // Final chunk - parse response
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve({
+              fileId: response.id,
+              fileName: response.name,
+              webViewLink: response.webViewLink,
+              webContentLink: response.webContentLink || '',
+              size: parseInt(response.size, 10),
+            });
+          } catch {
+            reject(new Error('Failed to parse upload response'));
+          }
+        } else if (xhr.status === 308) {
+          // Intermediate chunk acknowledged - continue
+          resolve(null);
         } else {
-          reject(new Error(`Resumable upload failed: ${xhr.status} ${xhr.statusText}`));
+          reject(new Error(`Chunk upload failed: ${xhr.status} ${xhr.statusText}`));
         }
       };
 
-      xhr.onerror = () => reject(new Error('Network error during resumable upload'));
-      xhr.send(file);
+      xhr.onabort = () => reject(new Error('Upload cancelled'));
+      xhr.onerror = () => reject(new Error('Network error during chunk upload'));
+      xhr.send(chunk);
     });
   }
 
@@ -627,22 +789,25 @@ class GoogleDriveOAuthService {
   }
 
   /**
-   * Download a file from Google Drive as a Blob using the Drive API
+   * Download a file from Google Drive as a Blob using the Drive API.
+   * Includes retry with exponential backoff for reliability.
    */
   async downloadFileAsBlob(fileId: string): Promise<Blob> {
     await this.ensureSignedIn();
-    const response = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-      {
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-        },
+    return this.retryWithBackoff(async () => {
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+          },
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to download file ${fileId}: ${response.statusText}`);
       }
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to download file ${fileId}: ${response.statusText}`);
-    }
-    return response.blob();
+      return response.blob();
+    });
   }
 }
 

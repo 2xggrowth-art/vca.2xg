@@ -1,10 +1,16 @@
 /**
  * Multi-File Upload Queue Component
  * Allows videographers to select multiple files and assign tags to each before batch upload
+ *
+ * Performance features:
+ * - Adaptive concurrency (2 parallel for large files, 3 for small)
+ * - Cancel individual uploads or cancel all
+ * - Progress tracking per file with throttled updates
+ * - Cached folder ID per batch
  */
 
-import { useState, useEffect } from 'react';
-import { Upload, CheckCircle, AlertCircle, Loader2, X, Film, Video, Music, FileVideo } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Upload, CheckCircle, AlertCircle, Loader2, X, Film, Video, Music, FileVideo, Ban } from 'lucide-react';
 import { googleDriveOAuthService } from '@/services/googleDriveOAuthService';
 
 // File type options for videographers (raw footage)
@@ -34,7 +40,7 @@ interface QueuedFile {
   id: string;
   file: File;
   fileType: FileTypeValue;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  status: 'pending' | 'uploading' | 'success' | 'error' | 'cancelled';
   progress: number;
   error?: string;
   uploadResult?: {
@@ -79,7 +85,7 @@ export default function MultiFileUploadQueue({
   onUploadComplete,
   onSingleFileComplete,
   acceptedFileTypes = 'video/*,audio/*',
-  maxSizeMB = 500,
+  maxSizeMB = 2048, // 2GB max (for 4K footage)
   fileTypeOptions = VIDEOGRAPHER_FILE_TYPES as unknown as FileTypeOption[],
   defaultFileType = 'A_ROLL',
   driveFolder = 'raw-footage',
@@ -88,6 +94,9 @@ export default function MultiFileUploadQueue({
   const [isUploading, setIsUploading] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Track if we've cancelled the entire batch
+  const batchCancelledRef = useRef(false);
 
   // Check sign-in status on mount
   useEffect(() => {
@@ -161,6 +170,35 @@ export default function MultiFileUploadQueue({
     setQueuedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
+  // Cancel a single uploading file
+  const cancelFile = useCallback((fileId: string) => {
+    googleDriveOAuthService.abortUpload(fileId);
+    setQueuedFiles((prev) =>
+      prev.map((f) =>
+        f.id === fileId ? { ...f, status: 'cancelled', error: 'Cancelled' } : f
+      )
+    );
+  }, []);
+
+  // Cancel all uploads
+  const cancelAll = useCallback(() => {
+    batchCancelledRef.current = true;
+    // Abort all uploading files
+    queuedFiles
+      .filter((f) => f.status === 'uploading')
+      .forEach((f) => {
+        googleDriveOAuthService.abortUpload(f.id);
+      });
+    setQueuedFiles((prev) =>
+      prev.map((f) =>
+        f.status === 'uploading' || f.status === 'pending'
+          ? { ...f, status: 'cancelled', error: 'Cancelled' }
+          : f
+      )
+    );
+    setIsUploading(false);
+  }, [queuedFiles]);
+
   // Upload a single file (used by the parallel uploader)
   const uploadSingleFile = async (
     queuedFile: QueuedFile,
@@ -171,6 +209,9 @@ export default function MultiFileUploadQueue({
     fileId: string;
     fileType: FileTypeValue;
   } | null> => {
+    // Check if batch was cancelled
+    if (batchCancelledRef.current) return null;
+
     try {
       // Update status to uploading
       setQueuedFiles((prev) =>
@@ -179,7 +220,7 @@ export default function MultiFileUploadQueue({
         )
       );
 
-      // Upload file with progress tracking
+      // Upload file with progress tracking, pass file ID as upload key for abort support
       const result = await googleDriveOAuthService.uploadFile(
         queuedFile.file,
         targetFolderId,
@@ -189,7 +230,8 @@ export default function MultiFileUploadQueue({
               f.id === queuedFile.id ? { ...f, progress: progressData.percentage } : f
             )
           );
-        }
+        },
+        queuedFile.id // uploadKey for abort support
       );
 
       // Update status to success
@@ -224,6 +266,17 @@ export default function MultiFileUploadQueue({
 
       return completedFile;
     } catch (err: any) {
+      // Don't log cancel as an error
+      if (err.message === 'Upload cancelled') {
+        setQueuedFiles((prev) =>
+          prev.map((f) =>
+            f.id === queuedFile.id
+              ? { ...f, status: 'cancelled', error: 'Cancelled' }
+              : f
+          )
+        );
+        return null;
+      }
       console.error('Upload error for file:', queuedFile.file.name, err);
       setQueuedFiles((prev) =>
         prev.map((f) =>
@@ -236,11 +289,12 @@ export default function MultiFileUploadQueue({
     }
   };
 
-  // Upload all files with parallel concurrency (up to 3 at a time)
+  // Upload all files with adaptive parallel concurrency
   const handleUploadAll = async () => {
     const pendingFiles = queuedFiles.filter((f) => f.status === 'pending');
     if (pendingFiles.length === 0) return;
 
+    batchCancelledRef.current = false;
     setIsUploading(true);
     setError(null);
 
@@ -258,12 +312,16 @@ export default function MultiFileUploadQueue({
         driveFolder
       );
 
-      // Upload up to MAX_CONCURRENT files in parallel
-      const MAX_CONCURRENT = 3;
+      // Adaptive concurrency: use 2 for large files (>500MB avg), 3 otherwise
+      const totalSize = pendingFiles.reduce((sum, f) => sum + f.file.size, 0);
+      const avgSize = totalSize / pendingFiles.length;
+      const MAX_CONCURRENT = avgSize > 500 * 1024 * 1024 ? 2 : 3;
+
       const queue = [...pendingFiles];
       const inFlight: Promise<void>[] = [];
 
       const processNext = async (): Promise<void> => {
+        if (batchCancelledRef.current) return;
         const nextFile = queue.shift();
         if (!nextFile) return;
 
@@ -295,7 +353,7 @@ export default function MultiFileUploadQueue({
     }
   };
 
-  // Clear completed/errored files
+  // Clear completed/errored/cancelled files
   const clearCompleted = () => {
     setQueuedFiles((prev) => prev.filter((f) => f.status === 'pending' || f.status === 'uploading'));
   };
@@ -305,6 +363,7 @@ export default function MultiFileUploadQueue({
   const uploadingCount = queuedFiles.filter((f) => f.status === 'uploading').length;
   const successCount = queuedFiles.filter((f) => f.status === 'success').length;
   const errorCount = queuedFiles.filter((f) => f.status === 'error').length;
+  const cancelledCount = queuedFiles.filter((f) => f.status === 'cancelled').length;
 
   return (
     <div className="space-y-4">
@@ -345,7 +404,7 @@ export default function MultiFileUploadQueue({
                 <span className="font-semibold text-blue-600">Click to select files</span> or drag and drop
               </div>
               <div className="text-xs text-gray-500">
-                Select multiple video/audio files (up to {maxSizeMB}MB each)
+                Select multiple video/audio files (up to {maxSizeMB >= 1024 ? `${(maxSizeMB / 1024).toFixed(0)}GB` : `${maxSizeMB}MB`} each)
               </div>
             </label>
           </div>
@@ -365,7 +424,7 @@ export default function MultiFileUploadQueue({
                 <h4 className="text-sm font-semibold text-gray-900">
                   Upload Queue ({queuedFiles.length} file{queuedFiles.length !== 1 ? 's' : ''})
                 </h4>
-                {(successCount > 0 || errorCount > 0) && (
+                {(successCount > 0 || errorCount > 0 || cancelledCount > 0) && (
                   <button
                     onClick={clearCompleted}
                     className="text-xs text-gray-500 hover:text-gray-700"
@@ -388,6 +447,8 @@ export default function MultiFileUploadQueue({
                           ? 'border-green-200 bg-green-50'
                           : qf.status === 'error'
                           ? 'border-red-200 bg-red-50'
+                          : qf.status === 'cancelled'
+                          ? 'border-gray-200 bg-gray-50'
                           : qf.status === 'uploading'
                           ? 'border-blue-200 bg-blue-50'
                           : 'border-gray-200 bg-white'
@@ -395,7 +456,7 @@ export default function MultiFileUploadQueue({
                     >
                       {/* Mobile-first layout */}
                       <div className="flex flex-col gap-2">
-                        {/* Top row: icon, filename, remove button */}
+                        {/* Top row: icon, filename, remove/cancel button */}
                         <div className="flex items-start gap-2">
                           {/* Status icon */}
                           <div className="flex-shrink-0 mt-0.5">
@@ -403,6 +464,8 @@ export default function MultiFileUploadQueue({
                               <CheckCircle className="w-5 h-5 text-green-600" />
                             ) : qf.status === 'error' ? (
                               <AlertCircle className="w-5 h-5 text-red-600" />
+                            ) : qf.status === 'cancelled' ? (
+                              <Ban className="w-5 h-5 text-gray-400" />
                             ) : qf.status === 'uploading' ? (
                               <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
                             ) : (
@@ -416,17 +479,29 @@ export default function MultiFileUploadQueue({
                               {qf.file.name}
                             </p>
                             <p className="text-xs text-gray-500 mt-0.5">
-                              {(qf.file.size / (1024 * 1024)).toFixed(1)} MB
+                              {qf.file.size >= 1024 * 1024 * 1024
+                                ? `${(qf.file.size / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                                : `${(qf.file.size / (1024 * 1024)).toFixed(1)} MB`}
                             </p>
                           </div>
 
-                          {/* Remove button (only for pending) */}
+                          {/* Remove button (pending) or Cancel button (uploading) */}
                           {qf.status === 'pending' && (
                             <button
                               onClick={() => removeFile(qf.id)}
                               className="flex-shrink-0 p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              title="Remove from queue"
                             >
                               <X className="w-5 h-5" />
+                            </button>
+                          )}
+                          {qf.status === 'uploading' && (
+                            <button
+                              onClick={() => cancelFile(qf.id)}
+                              className="flex-shrink-0 p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              title="Cancel upload"
+                            >
+                              <Ban className="w-4 h-4" />
                             </button>
                           )}
                         </div>
@@ -461,9 +536,9 @@ export default function MultiFileUploadQueue({
                           </div>
                         )}
 
-                        {/* Error message */}
-                        {qf.status === 'error' && qf.error && (
-                          <p className="text-xs text-red-600 pl-7">{qf.error}</p>
+                        {/* Error/cancelled message */}
+                        {(qf.status === 'error' || qf.status === 'cancelled') && qf.error && (
+                          <p className={`text-xs pl-7 ${qf.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>{qf.error}</p>
                         )}
                       </div>
                     </div>
@@ -477,6 +552,7 @@ export default function MultiFileUploadQueue({
                 {uploadingCount > 0 && <span className="text-blue-600">{uploadingCount} uploading</span>}
                 {successCount > 0 && <span className="text-green-600">{successCount} completed</span>}
                 {errorCount > 0 && <span className="text-red-600">{errorCount} failed</span>}
+                {cancelledCount > 0 && <span className="text-gray-500">{cancelledCount} cancelled</span>}
               </div>
 
               {/* Upload button */}
@@ -490,11 +566,19 @@ export default function MultiFileUploadQueue({
                 </button>
               )}
 
-              {/* Uploading indicator */}
+              {/* Uploading indicator with cancel all button */}
               {isUploading && (
-                <div className="flex items-center justify-center gap-2 text-blue-600 py-3">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm font-medium">Uploading files... Please wait</span>
+                <div className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-2 text-blue-600">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Uploading files...</span>
+                  </div>
+                  <button
+                    onClick={cancelAll}
+                    className="px-3 py-1.5 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    Cancel All
+                  </button>
                 </div>
               )}
             </div>
@@ -503,7 +587,7 @@ export default function MultiFileUploadQueue({
           {/* Folder info */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
             <p>
-              <strong>📁 Upload location:</strong> Your Google Drive → Production Files → {projectId} → {
+              <strong>Upload location:</strong> Your Google Drive → Production Files → {projectId} → {
                 driveFolder === 'raw-footage' ? 'Raw Footage' :
                 driveFolder === 'edited-video' ? 'Edited Videos' :
                 driveFolder === 'final-video' ? 'Final Videos' : 'Raw Footage'
