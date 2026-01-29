@@ -207,43 +207,27 @@ export const videographerQueueService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
-    // Check if project has raw footage files
-    const { data: hasFiles, error: checkError } = await supabase.rpc(
-      'has_raw_footage',
-      { p_analysis_id: data.analysisId }
-    );
+    // ALWAYS do a direct file count check - don't rely on RPC which may be unreliable
+    const rawFileTypes = [
+      'RAW_FOOTAGE', 'A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP', 'OTHER',
+      'raw-footage'
+    ];
 
-    if (checkError) {
-      console.error('Error checking raw footage:', checkError);
-      // Fallback: check manually - accept both uppercase (legacy) and lowercase (current) file types
-      const { count } = await supabase
-        .from('production_files')
-        .select('id', { count: 'exact', head: true })
-        .eq('analysis_id', data.analysisId)
-        .in('file_type', [
-          'RAW_FOOTAGE', 'A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP',
-          'raw-footage', 'edited-video', 'final-video'
-        ])
-        .eq('is_deleted', false);
+    const { count: fileCount, error: countError } = await supabase
+      .from('production_files')
+      .select('id', { count: 'exact', head: true })
+      .eq('analysis_id', data.analysisId)
+      .in('file_type', rawFileTypes)
+      .eq('is_deleted', false);
 
-      if (!count || count === 0) {
-        throw new Error('Please upload at least one raw footage file before marking as complete');
-      }
-    } else if (!hasFiles) {
-      // RPC returned false - do a manual check as fallback
-      const { count } = await supabase
-        .from('production_files')
-        .select('id', { count: 'exact', head: true })
-        .eq('analysis_id', data.analysisId)
-        .in('file_type', [
-          'RAW_FOOTAGE', 'A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP',
-          'raw-footage', 'edited-video', 'final-video'
-        ])
-        .eq('is_deleted', false);
+    console.log('markShootingComplete: File count for', data.analysisId, '=', fileCount, countError ? `Error: ${countError.message}` : '');
 
-      if (!count || count === 0) {
-        throw new Error('Please upload at least one raw footage file before marking as complete');
-      }
+    if (countError) {
+      throw new Error('Failed to verify files. Please try again.');
+    }
+
+    if (!fileCount || fileCount === 0) {
+      throw new Error('Please upload at least one raw footage file before marking as complete. No files found for this project.');
     }
 
     // Update the analysis

@@ -2,6 +2,7 @@
  * Admin Sidebar - Notion-Inspired Mobile-Responsive Navigation
  */
 
+import { useState } from 'react';
 import {
   UserGroupIcon,
   ExclamationTriangleIcon,
@@ -10,10 +11,17 @@ import {
   ArrowRightOnRectangleIcon,
   FolderIcon,
   Bars3Icon,
-  XMarkIcon
+  XMarkIcon,
+  BoltIcon,
+  VideoCameraIcon,
+  FilmIcon,
+  MegaphoneIcon,
+  CheckCircleIcon,
 } from '@heroicons/react/24/outline';
+import AdminQuickScriptModal from './AdminQuickScriptModal';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { adminService } from '@/services/adminService';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
@@ -33,10 +41,12 @@ export default function AdminSidebar({
   onToggle = () => {}
 }: AdminSidebarProps) {
   const navigate = useNavigate();
+  const [showQuickScriptModal, setShowQuickScriptModal] = useState(false);
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
     if (error) {
+      console.error('Logout error:', error);
       toast.error('Failed to logout');
     } else {
       toast.success('Logged out successfully');
@@ -67,7 +77,7 @@ export default function AdminSidebar({
 
       return (scriptsCount || 0) + (shootsCount || 0) + (editsCount || 0);
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 60000, // Refresh every 60 seconds
   });
 
   // Get team members count
@@ -95,6 +105,13 @@ export default function AdminSidebar({
 
       return count || 0;
     },
+  });
+
+  // Get queue stats for pipeline overview
+  const { data: queueStats } = useQuery({
+    queryKey: ['admin', 'queue-stats'],
+    queryFn: () => adminService.getQueueStats(),
+    refetchInterval: 60000, // Refresh every 60 seconds
   });
 
   return (
@@ -143,6 +160,15 @@ export default function AdminSidebar({
 
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+        {/* Quick Add Script Button */}
+        <button
+          onClick={() => setShowQuickScriptModal(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 min-h-[48px] rounded-lg bg-gradient-to-r from-primary-600 to-purple-600 text-white font-medium hover:from-primary-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg mb-4"
+        >
+          <BoltIcon className="w-5 h-5" />
+          <span>Quick Add Script</span>
+        </button>
+
         {/* Team Members */}
         <button
           onClick={() => onPageChange('team')}
@@ -222,6 +248,70 @@ export default function AdminSidebar({
             </span>
           )}
         </button>
+
+        {/* Pipeline Overview */}
+        {queueStats && (
+          <div className="mt-6 pt-4 border-t border-gray-200">
+            <h3 className="px-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+              Pipeline Overview
+            </h3>
+            <div className="space-y-2">
+              {/* Planning Queue */}
+              <div className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <VideoCameraIcon className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-medium text-blue-800">Planning</span>
+                </div>
+                <span className="text-xs font-bold text-blue-700">{queueStats.planning}</span>
+              </div>
+
+              {/* Shooting */}
+              <div className="flex items-center justify-between px-3 py-2 bg-yellow-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <VideoCameraIcon className="w-4 h-4 text-yellow-600" />
+                  <span className="text-xs font-medium text-yellow-800">Shooting</span>
+                </div>
+                <span className="text-xs font-bold text-yellow-700">{queueStats.shooting}</span>
+              </div>
+
+              {/* Ready for Edit */}
+              <div className="flex items-center justify-between px-3 py-2 bg-purple-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <FilmIcon className="w-4 h-4 text-purple-600" />
+                  <span className="text-xs font-medium text-purple-800">Ready for Edit</span>
+                </div>
+                <span className="text-xs font-bold text-purple-700">{queueStats.readyForEdit}</span>
+              </div>
+
+              {/* Editing */}
+              <div className="flex items-center justify-between px-3 py-2 bg-orange-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <FilmIcon className="w-4 h-4 text-orange-600" />
+                  <span className="text-xs font-medium text-orange-800">Editing</span>
+                </div>
+                <span className="text-xs font-bold text-orange-700">{queueStats.editing}</span>
+              </div>
+
+              {/* Ready to Post */}
+              <div className="flex items-center justify-between px-3 py-2 bg-green-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <MegaphoneIcon className="w-4 h-4 text-green-600" />
+                  <span className="text-xs font-medium text-green-800">Ready to Post</span>
+                </div>
+                <span className="text-xs font-bold text-green-700">{queueStats.readyToPost}</span>
+              </div>
+
+              {/* Posted (Total) */}
+              <div className="flex items-center justify-between px-3 py-2 bg-gray-100 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircleIcon className="w-4 h-4 text-gray-600" />
+                  <span className="text-xs font-medium text-gray-700">Posted</span>
+                </div>
+                <span className="text-xs font-bold text-gray-600">{queueStats.posted}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* Footer - Settings & Actions */}
@@ -280,6 +370,12 @@ export default function AdminSidebar({
         </div>
       </div>
       </aside>
+
+      {/* Quick Script Modal */}
+      <AdminQuickScriptModal
+        isOpen={showQuickScriptModal}
+        onClose={() => setShowQuickScriptModal(false)}
+      />
     </>
   );
 }

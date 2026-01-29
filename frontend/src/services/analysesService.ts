@@ -78,6 +78,15 @@ export const analysesService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
+    // Check if user is a trusted writer (auto-approve their scripts)
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('is_trusted_writer')
+      .eq('id', user.id)
+      .single();
+
+    const isTrustedWriter = userProfile?.is_trusted_writer === true;
+
     // Upload all voice notes and audio recordings
     let hookVoiceUrl = '';
     let whyViralVoiceUrl = '';
@@ -134,8 +143,12 @@ export const analysesService = {
       .from('viral_analyses')
       .insert({
         user_id: user.id,
+        // Auto-approve for trusted writers, otherwise PENDING
+        status: isTrustedWriter ? 'APPROVED' : 'PENDING',
+        production_stage: isTrustedWriter ? 'PLANNING' : null,
         // Original fields
         reference_url: formData.referenceUrl,
+        title: formData.title || null,
         hook: formData.hook || '',
         hook_voice_note_url: hookVoiceUrl,
         why_viral: formData.whyViral || '',
@@ -279,6 +292,7 @@ export const analysesService = {
       .update({
         // Original fields
         reference_url: formData.referenceUrl,
+        title: formData.title || null,
         hook: formData.hook || '',
         hook_voice_note_url: hookVoiceUrl,
         why_viral: formData.whyViral || '',

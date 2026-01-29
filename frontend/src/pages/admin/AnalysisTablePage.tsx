@@ -10,7 +10,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +24,8 @@ import {
 import AnalysisDataGrid from '@/components/admin/AnalysisDataGrid';
 import AnalysisSideDrawer from '@/components/admin/AnalysisSideDrawer';
 import AssignTeamModal from '@/components/AssignTeamModal';
-import type { ViralAnalysis, ReviewAnalysisData } from '@/types';
+import { CastFilterDropdown, ActiveCastFilters } from '@/components/filters';
+import type { ViralAnalysis, ReviewAnalysisData, CastFilter, CastComposition } from '@/types';
 
 type StatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
@@ -37,11 +38,14 @@ const STATUS_TABS: { value: StatusFilter; label: string; color: string }[] = [
 
 export default function AnalysisTablePage() {
   const { userId } = useParams<{ userId?: string }>();
+  const [searchParams] = useSearchParams();
+  const isAssignedTo = searchParams.get('assignedTo') === 'true';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  const [castFilter, setCastFilter] = useState<CastFilter>({});
   const [selectedAnalysis, setSelectedAnalysis] = useState<ViralAnalysis | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -49,14 +53,25 @@ export default function AnalysisTablePage() {
 
   // Fetch analyses - either for specific user or all
   const { data: analyses = [], isLoading } = useQuery({
-    queryKey: ['admin', 'analyses-table', userId],
+    queryKey: ['admin', 'analyses-table', userId, isAssignedTo],
     queryFn: async () => {
       // Use adminService which fetches ALL fields including tags
       const allAnalyses = await adminService.getAllAnalyses();
 
       // Filter by user if userId is provided
       if (userId) {
-        return allAnalyses.filter(analysis => analysis.user_id === userId);
+        if (isAssignedTo) {
+          // For assigned projects, filter by project_assignments
+          // The analysis should have this user in videographer, editor, or posting_manager
+          return allAnalyses.filter(analysis =>
+            analysis.videographer?.id === userId ||
+            analysis.editor?.id === userId ||
+            analysis.posting_manager?.id === userId
+          );
+        } else {
+          // For submitted scripts, filter by user_id
+          return allAnalyses.filter(analysis => analysis.user_id === userId);
+        }
       }
 
       return allAnalyses;
@@ -134,6 +149,39 @@ export default function AnalysisTablePage() {
     },
   });
 
+  // Helper function to check if a project matches cast filter
+  const matchesCastFilter = (project: ViralAnalysis, filter: CastFilter): boolean => {
+    const cast = project.cast_composition as CastComposition | null;
+    if (!cast) return Object.keys(filter).length === 0;
+
+    if (filter.minMen !== undefined && (cast.man || 0) < filter.minMen) return false;
+    if (filter.maxMen !== undefined && (cast.man || 0) > filter.maxMen) return false;
+    if (filter.minWomen !== undefined && (cast.woman || 0) < filter.minWomen) return false;
+    if (filter.maxWomen !== undefined && (cast.woman || 0) > filter.maxWomen) return false;
+    if (filter.minBoys !== undefined && (cast.boy || 0) < filter.minBoys) return false;
+    if (filter.maxBoys !== undefined && (cast.boy || 0) > filter.maxBoys) return false;
+    if (filter.minGirls !== undefined && (cast.girl || 0) < filter.minGirls) return false;
+    if (filter.maxGirls !== undefined && (cast.girl || 0) > filter.maxGirls) return false;
+    if (filter.minTotal !== undefined && (cast.total || 0) < filter.minTotal) return false;
+    if (filter.maxTotal !== undefined && (cast.total || 0) > filter.maxTotal) return false;
+    if (filter.ownerRequired === true && !cast.include_owner) return false;
+    if (filter.ownerRequired === false && cast.include_owner) return false;
+    if (filter.needsChildren && (cast.boy || 0) === 0 && (cast.girl || 0) === 0) return false;
+    if (filter.needsSeniors && (cast.senior_man || 0) === 0 && (cast.senior_woman || 0) === 0) return false;
+    if (filter.needsTeens && (cast.teen_boy || 0) === 0 && (cast.teen_girl || 0) === 0) return false;
+
+    return true;
+  };
+
+  // Remove specific cast filter key
+  const removeCastFilterKey = (key: keyof CastFilter) => {
+    setCastFilter(prev => {
+      const newFilter = { ...prev };
+      delete newFilter[key];
+      return newFilter;
+    });
+  };
+
   // Filter analyses
   const filteredAnalyses = useMemo(() => {
     let filtered = analyses;
@@ -156,8 +204,13 @@ export default function AnalysisTablePage() {
       );
     }
 
+    // Cast filter
+    if (Object.keys(castFilter).length > 0) {
+      filtered = filtered.filter((a: ViralAnalysis) => matchesCastFilter(a, castFilter));
+    }
+
     return filtered;
-  }, [analyses, statusFilter, searchTerm]);
+  }, [analyses, statusFilter, searchTerm, castFilter]);
 
   // Count by status
   const statusCounts = useMemo(() => {
@@ -223,7 +276,9 @@ export default function AnalysisTablePage() {
               <h1 className="text-xl font-bold text-gray-900 flex items-center">
                 <TableCellsIcon className="w-6 h-6 mr-2 text-primary-600" />
                 {userId && userInfo
-                  ? `${userInfo.full_name || userInfo.email}'s Analyses`
+                  ? isAssignedTo
+                    ? `Projects Assigned to ${userInfo.full_name || userInfo.email}`
+                    : `${userInfo.full_name || userInfo.email}'s Analyses`
                   : 'All Analyses'}
               </h1>
               <p className="text-sm text-gray-500 mt-0.5">
@@ -232,18 +287,36 @@ export default function AnalysisTablePage() {
             </div>
           </div>
 
-          {/* Search */}
-          <div className="relative">
-            <MagnifyingGlassIcon className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by ID, hook, name..."
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent w-64"
+          {/* Search & Cast Filter */}
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <MagnifyingGlassIcon className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by ID, hook, name..."
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent w-64"
+              />
+            </div>
+            <CastFilterDropdown
+              filters={castFilter}
+              onChange={setCastFilter}
+              matchCount={filteredAnalyses.length}
             />
           </div>
         </div>
+
+        {/* Active Cast Filters */}
+        {Object.keys(castFilter).length > 0 && (
+          <div className="mb-3">
+            <ActiveCastFilters
+              filters={castFilter}
+              onRemove={removeCastFilterKey}
+              onClearAll={() => setCastFilter({})}
+            />
+          </div>
+        )}
 
         {/* Status Filter Tabs */}
         <div className="flex items-center space-x-2">

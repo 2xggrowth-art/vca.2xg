@@ -9,18 +9,46 @@ export const UserRole = {
 
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
+// ============================================
+// PRODUCTION STAGES - V2.0 (Simplified)
+// ============================================
+// Old stages mapped to new:
+//   NOT_STARTED, PRE_PRODUCTION, PLANNED -> PLANNING
+//   SHOOT_REVIEW -> READY_FOR_EDIT
+//   EDIT_REVIEW, FINAL_REVIEW -> READY_TO_POST
+//   SHOOTING, EDITING, READY_TO_POST, POSTED -> unchanged
+// ============================================
+
 export const ProductionStage = {
-  NOT_STARTED: 'NOT_STARTED',
-  PRE_PRODUCTION: 'PRE_PRODUCTION',
-  PLANNED: 'PLANNED',
+  // V2.0 Stages (New)
+  PLANNING: 'PLANNING',             // Available for videographer to pick
+  SHOOTING: 'SHOOTING',             // Videographer filming
+  READY_FOR_EDIT: 'READY_FOR_EDIT', // Available for editor to pick (has raw files)
+  EDITING: 'EDITING',               // Editor working
+  READY_TO_POST: 'READY_TO_POST',   // Available for posting manager
+  POSTED: 'POSTED',                 // Complete
+
+  // Legacy stages (kept for backwards compatibility with historical data)
+  // These should not be used for new projects
+  NOT_STARTED: 'NOT_STARTED',       // @deprecated - use PLANNING
+  PRE_PRODUCTION: 'PRE_PRODUCTION', // @deprecated - use PLANNING
+  PLANNED: 'PLANNED',               // @deprecated - use PLANNING
+  SHOOT_REVIEW: 'SHOOT_REVIEW',     // @deprecated - use READY_FOR_EDIT
+  EDIT_REVIEW: 'EDIT_REVIEW',       // @deprecated - use READY_TO_POST
+  FINAL_REVIEW: 'FINAL_REVIEW',     // @deprecated - use READY_TO_POST
+} as const;
+
+// New stages only (for new UI components)
+export const ProductionStageV2 = {
+  PLANNING: 'PLANNING',
   SHOOTING: 'SHOOTING',
-  SHOOT_REVIEW: 'SHOOT_REVIEW',
+  READY_FOR_EDIT: 'READY_FOR_EDIT',
   EDITING: 'EDITING',
-  EDIT_REVIEW: 'EDIT_REVIEW',
-  FINAL_REVIEW: 'FINAL_REVIEW',
   READY_TO_POST: 'READY_TO_POST',
   POSTED: 'POSTED',
 } as const;
+
+export type ProductionStageV2 = typeof ProductionStageV2[keyof typeof ProductionStageV2];
 
 export type ProductionStage = typeof ProductionStage[keyof typeof ProductionStage];
 
@@ -40,6 +68,28 @@ export const AssignmentRole = {
 } as const;
 
 export type AssignmentRole = typeof AssignmentRole[keyof typeof AssignmentRole];
+
+// Posting platforms for posting manager
+export const PostingPlatform = {
+  INSTAGRAM_REEL: 'INSTAGRAM_REEL',
+  INSTAGRAM_POST: 'INSTAGRAM_POST',
+  INSTAGRAM_STORY: 'INSTAGRAM_STORY',
+  TIKTOK: 'TIKTOK',
+  YOUTUBE_SHORTS: 'YOUTUBE_SHORTS',
+  YOUTUBE_VIDEO: 'YOUTUBE_VIDEO',
+} as const;
+
+export type PostingPlatform = typeof PostingPlatform[keyof typeof PostingPlatform];
+
+// Platform display names for UI
+export const PostingPlatformLabels: Record<PostingPlatform, string> = {
+  INSTAGRAM_REEL: 'Instagram Reel',
+  INSTAGRAM_POST: 'Instagram Post',
+  INSTAGRAM_STORY: 'Instagram Story',
+  TIKTOK: 'TikTok',
+  YOUTUBE_SHORTS: 'YouTube Shorts',
+  YOUTUBE_VIDEO: 'YouTube Video',
+};
 
 export const FileType = {
   // Video components
@@ -100,6 +150,66 @@ export interface CharacterTag {
   updated_at: string;
 }
 
+// ============================================
+// CAST COMPOSITION (Structured Demographics)
+// ============================================
+export interface CastComposition {
+  man: number;
+  woman: number;
+  boy: number;
+  girl: number;
+  teen_boy: number;
+  teen_girl: number;
+  senior_man: number;
+  senior_woman: number;
+  include_owner: boolean;
+  total: number; // Auto-calculated by database trigger
+}
+
+// Default empty cast composition
+export const DEFAULT_CAST_COMPOSITION: CastComposition = {
+  man: 0,
+  woman: 0,
+  boy: 0,
+  girl: 0,
+  teen_boy: 0,
+  teen_girl: 0,
+  senior_man: 0,
+  senior_woman: 0,
+  include_owner: false,
+  total: 0,
+};
+
+// Cast category labels for UI
+export const CastCategoryLabels: Record<keyof Omit<CastComposition, 'total' | 'include_owner'>, string> = {
+  man: 'Men',
+  woman: 'Women',
+  boy: 'Boys',
+  girl: 'Girls',
+  teen_boy: 'Teen Boys',
+  teen_girl: 'Teen Girls',
+  senior_man: 'Senior Men',
+  senior_woman: 'Senior Women',
+};
+
+// Cast filter interface for admin filtering
+export interface CastFilter {
+  minMen?: number;
+  maxMen?: number;
+  minWomen?: number;
+  maxWomen?: number;
+  minBoys?: number;
+  maxBoys?: number;
+  minGirls?: number;
+  maxGirls?: number;
+  needsChildren?: boolean;
+  needsSeniors?: boolean;
+  needsTeens?: boolean;
+  ownerRequired?: boolean | null; // true, false, or null (any)
+  minTotal?: number;
+  maxTotal?: number;
+}
+
 export interface Profile {
   id: string;
   email: string;
@@ -108,6 +218,8 @@ export interface Profile {
   avatar_url?: string;
   created_at: string;
   updated_at: string;
+  // Workflow v2.0: Trusted writer auto-approval
+  is_trusted_writer?: boolean;
 }
 
 export interface ProjectAssignment {
@@ -128,6 +240,7 @@ export interface ViralAnalysis {
   id: string;
   user_id: string;
   reference_url: string;
+  title?: string; // Title of the content
   hook?: string;
   hook_voice_note_url?: string;
   why_viral?: string;
@@ -201,7 +314,10 @@ export interface ViralAnalysis {
   industry?: Industry;
   profile?: ProfileListItem;
   hook_tags?: HookTag[]; // Many-to-many
-  character_tags?: CharacterTag[]; // Many-to-many
+  character_tags?: CharacterTag[]; // Many-to-many (legacy)
+
+  // Structured cast composition (new - preferred over character_tags)
+  cast_composition?: CastComposition;
 
   // Review fields
   reviewed_by?: string;
@@ -240,6 +356,16 @@ export interface ViralAnalysis {
   edited_video_drive_url?: string;
   final_video_url?: string;
 
+  // Workflow v2.0: Posting manager fields
+  posting_platform?: PostingPlatform;      // Platform for posting
+  posting_caption?: string;                // Caption/description text
+  posting_heading?: string;                // Title for YouTube/TikTok
+  posting_hashtags?: string[];             // Array of hashtags
+  scheduled_post_time?: string;            // When to post (ISO string)
+  posted_url?: string;                     // Link to live post
+  posted_at?: string;                      // Actual post time (ISO string)
+  posted_urls?: Array<{ url: string; posted_at: string }>; // Multi-platform posts tracking
+
   // Assignments
   assignments?: ProjectAssignment[];
   videographer?: Profile;
@@ -260,6 +386,7 @@ export interface ViralAnalysis {
 export interface AnalysisFormData {
   // Existing fields
   referenceUrl: string;
+  title: string; // Title of the content (added after reference URL)
   hook: string;
   hookVoiceNote: Blob | null;
   hookVoiceNoteUrl: string;
@@ -279,6 +406,7 @@ export interface AnalysisFormData {
   charactersInvolved: string;
   creatorName: string;
   unusualElement: string;
+  hookTypes: string[]; // Multi-select: Visual Hook, Audio Hook, SFX Hook, Onscreen Hook
   worksWithoutAudio: string;
   contentRating: number;
   replicationStrength: number;
@@ -347,6 +475,7 @@ export interface ReviewAnalysisData {
   contentQuality: number;
   viralPotential: number;
   replicationClarity: number;
+  profile_id?: string; // Required when approving - used to generate content_id
 }
 
 export interface AssignTeamData {
@@ -416,3 +545,90 @@ export interface UpdateAdminFieldsData {
   syedSirPresence?: 'YES' | 'NO';
   planningDate?: string;
 }
+
+// ============================================
+// WORKFLOW V2.0 - New Interfaces
+// ============================================
+
+// Videographer picks a project from PLANNING queue
+export interface PickProjectData {
+  analysisId: string;
+  profileId?: string;             // OPTIONAL - can be set later, content_id generated when profile selected
+  hookTagIds?: string[];
+  castComposition?: CastComposition;  // Structured cast composition instead of freeform character tags
+  deadline?: string;              // Videographer can set their own deadline
+}
+
+// Editor picks a project from READY_FOR_EDIT queue
+export interface PickEditProjectData {
+  analysisId: string;
+}
+
+// Posting manager sets posting details
+export interface SetPostingDetailsData {
+  analysisId: string;
+  postingPlatform: PostingPlatform;
+  postingCaption: string;
+  postingHeading?: string;        // Required for YouTube/TikTok
+  postingHashtags?: string[];
+  scheduledPostTime?: string;     // ISO datetime string
+}
+
+// Mark project as posted with live URL
+export interface MarkAsPostedData {
+  analysisId: string;
+  postedUrl: string;              // REQUIRED - link to live post
+  keepInQueue?: boolean;          // Optional - keep in queue to post to more platforms
+}
+
+// Videographer marks shooting complete
+export interface MarkShootingCompleteData {
+  analysisId: string;
+  productionNotes?: string;
+}
+
+// Editor marks editing complete
+export interface MarkEditingCompleteData {
+  analysisId: string;
+  productionNotes?: string;
+}
+
+// Admin updates trusted writer status
+export interface UpdateTrustedWriterData {
+  userId: string;
+  isTrustedWriter: boolean;
+}
+
+// Stage labels for UI display
+export const ProductionStageLabels: Record<string, string> = {
+  PLANNING: 'Planning',
+  SHOOTING: 'Shooting',
+  READY_FOR_EDIT: 'Ready for Edit',
+  EDITING: 'Editing',
+  READY_TO_POST: 'Ready to Post',
+  POSTED: 'Posted',
+  // Legacy labels
+  NOT_STARTED: 'Not Started',
+  PRE_PRODUCTION: 'Pre-Production',
+  PLANNED: 'Planned',
+  SHOOT_REVIEW: 'Shoot Review',
+  EDIT_REVIEW: 'Edit Review',
+  FINAL_REVIEW: 'Final Review',
+};
+
+// Stage colors for UI
+export const ProductionStageColors: Record<string, string> = {
+  PLANNING: 'bg-blue-100 text-blue-800',
+  SHOOTING: 'bg-yellow-100 text-yellow-800',
+  READY_FOR_EDIT: 'bg-purple-100 text-purple-800',
+  EDITING: 'bg-orange-100 text-orange-800',
+  READY_TO_POST: 'bg-green-100 text-green-800',
+  POSTED: 'bg-gray-100 text-gray-800',
+  // Legacy colors
+  NOT_STARTED: 'bg-gray-100 text-gray-800',
+  PRE_PRODUCTION: 'bg-blue-100 text-blue-800',
+  PLANNED: 'bg-blue-100 text-blue-800',
+  SHOOT_REVIEW: 'bg-purple-100 text-purple-800',
+  EDIT_REVIEW: 'bg-green-100 text-green-800',
+  FINAL_REVIEW: 'bg-green-100 text-green-800',
+};

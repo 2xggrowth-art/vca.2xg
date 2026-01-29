@@ -131,25 +131,56 @@ export const adminService = {
       }
     }
 
+    // Build update object - include production_stage = 'PLANNING' when approving
+    const updateData: Record<string, unknown> = {
+      status: reviewData.status,
+      feedback: reviewData.feedback,
+      feedback_voice_note_url,
+      hook_strength: reviewData.hookStrength,
+      content_quality: reviewData.contentQuality,
+      viral_potential: reviewData.viralPotential,
+      replication_clarity: reviewData.replicationClarity,
+      overall_score: parseFloat(overall_score.toFixed(1)),
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+    };
+
+    // If approving, set production_stage to PLANNING
+    if (reviewData.status === 'APPROVED') {
+      updateData.production_stage = 'PLANNING';
+    }
+
+    // If profile_id is provided, update it
+    if (reviewData.profile_id) {
+      updateData.profile_id = reviewData.profile_id;
+    }
+
     const { data, error } = await supabase
       .from('viral_analyses')
-      .update({
-        status: reviewData.status,
-        feedback: reviewData.feedback,
-        feedback_voice_note_url,
-        hook_strength: reviewData.hookStrength,
-        content_quality: reviewData.contentQuality,
-        viral_potential: reviewData.viralPotential,
-        replication_clarity: reviewData.replicationClarity,
-        overall_score: parseFloat(overall_score.toFixed(1)),
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
+
+    // If profile_id is provided on approval, generate content_id using RPC
+    if (reviewData.status === 'APPROVED' && reviewData.profile_id) {
+      try {
+        const { error: rpcError } = await supabase.rpc('generate_content_id_on_approval', {
+          p_analysis_id: id,
+          p_profile_id: reviewData.profile_id,
+        });
+
+        if (rpcError) {
+          console.error('Failed to generate content_id:', rpcError);
+          // Don't throw - content ID can be generated later by videographer
+        }
+      } catch (err) {
+        console.error('Error calling generate_content_id_on_approval:', err);
+      }
+    }
+
     return data;
   },
 
@@ -229,6 +260,74 @@ export const adminService = {
       pendingAnalyses: pending,
       approvedAnalyses: approved,
       rejectedAnalyses: rejected,
+    };
+  },
+
+  /**
+   * Get queue stats for pipeline overview (Workflow V2)
+   * Returns counts for each production stage
+   */
+  async getQueueStats(): Promise<{
+    pending: number;
+    planning: number;
+    shooting: number;
+    readyForEdit: number;
+    editing: number;
+    readyToPost: number;
+    posted: number;
+    totalActive: number;
+  }> {
+    // Get all analyses with their stages
+    const { data, error } = await supabase
+      .from('viral_analyses')
+      .select('status, production_stage');
+
+    if (error) throw error;
+
+    const analyses = data || [];
+
+    // Count pending approvals
+    const pending = analyses.filter(a => a.status === 'PENDING').length;
+
+    // Count by production stage (only approved)
+    const approved = analyses.filter(a => a.status === 'APPROVED');
+
+    const planning = approved.filter(a =>
+      a.production_stage === 'PLANNING' ||
+      a.production_stage === 'NOT_STARTED' ||
+      a.production_stage === 'PRE_PRODUCTION' ||
+      a.production_stage === 'PLANNED'
+    ).length;
+
+    const shooting = approved.filter(a => a.production_stage === 'SHOOTING').length;
+
+    const readyForEdit = approved.filter(a =>
+      a.production_stage === 'READY_FOR_EDIT' ||
+      a.production_stage === 'SHOOT_REVIEW'
+    ).length;
+
+    const editing = approved.filter(a => a.production_stage === 'EDITING').length;
+
+    const readyToPost = approved.filter(a =>
+      a.production_stage === 'READY_TO_POST' ||
+      a.production_stage === 'EDIT_REVIEW' ||
+      a.production_stage === 'FINAL_REVIEW'
+    ).length;
+
+    const posted = approved.filter(a => a.production_stage === 'POSTED').length;
+
+    // Total active = all except POSTED
+    const totalActive = planning + shooting + readyForEdit + editing + readyToPost;
+
+    return {
+      pending,
+      planning,
+      shooting,
+      readyForEdit,
+      editing,
+      readyToPost,
+      posted,
+      totalActive,
     };
   },
 };

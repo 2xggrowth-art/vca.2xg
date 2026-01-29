@@ -345,7 +345,9 @@ class GoogleDriveOAuthService {
   }
 
   /**
-   * Upload file to Google Drive with progress tracking
+   * Upload file to Google Drive with progress tracking.
+   * Uses resumable upload for files > 5MB (recommended by Google for large files).
+   * Uses multipart upload for files <= 5MB.
    */
   async uploadFile(
     file: File,
@@ -354,6 +356,39 @@ class GoogleDriveOAuthService {
   ): Promise<UploadResult> {
     await this.ensureSignedIn();
 
+    const FIVE_MB = 5 * 1024 * 1024;
+
+    try {
+      const result = file.size > FIVE_MB
+        ? await this.resumableUpload(file, folderId, onProgress)
+        : await this.multipartUpload(file, folderId, onProgress);
+
+      // Make file public AND share with admin in parallel (not sequentially)
+      const permissionPromises: Promise<void>[] = [
+        this.makeFilePublic(result.fileId),
+      ];
+      if (ADMIN_EMAIL) {
+        permissionPromises.push(
+          this.shareFileWithEmail(result.fileId, ADMIN_EMAIL, 'reader')
+        );
+      }
+      await Promise.all(permissionPromises);
+
+      return result;
+    } catch (error: any) {
+      console.error('❌ Upload error:', error);
+      throw new Error(`Failed to upload file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Multipart upload for small files (<= 5MB)
+   */
+  private async multipartUpload(
+    file: File,
+    folderId: string,
+    onProgress?: (progress: UploadProgress) => void
+  ): Promise<UploadResult> {
     const metadata = {
       name: file.name,
       mimeType: file.type,
@@ -364,56 +399,123 @@ class GoogleDriveOAuthService {
     formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     formData.append('file', file);
 
-    try {
-      const result = await new Promise<UploadResult>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,size');
+    return new Promise<UploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,size');
 
-        xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
+      xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
 
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable && onProgress) {
-            onProgress({
-              loaded: event.loaded,
-              total: event.total,
-              percentage: Math.round((event.loaded / event.total) * 100),
-            });
-          }
-        };
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            percentage: Math.round((event.loaded / event.total) * 100),
+          });
+        }
+      };
 
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            const response = JSON.parse(xhr.responseText);
-            console.log(`✅ Uploaded: ${response.name}`);
-            resolve({
-              fileId: response.id,
-              fileName: response.name,
-              webViewLink: response.webViewLink,
-              webContentLink: response.webContentLink || '',
-              size: parseInt(response.size, 10),
-            });
-          } else {
-            reject(new Error(`Upload failed: ${xhr.statusText}`));
-          }
-        };
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          const response = JSON.parse(xhr.responseText);
+          console.log(`✅ Uploaded: ${response.name}`);
+          resolve({
+            fileId: response.id,
+            fileName: response.name,
+            webViewLink: response.webViewLink,
+            webContentLink: response.webContentLink || '',
+            size: parseInt(response.size, 10),
+          });
+        } else {
+          reject(new Error(`Upload failed: ${xhr.statusText}`));
+        }
+      };
 
-        xhr.onerror = () => reject(new Error('Network error during upload'));
-        xhr.send(formData);
-      });
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.send(formData);
+    });
+  }
 
-      // Make file publicly viewable (anyone with the link can view)
-      await this.makeFilePublic(result.fileId);
+  /**
+   * Resumable upload for large files (> 5MB).
+   * Step 1: Initiate resumable session to get a session URI.
+   * Step 2: PUT the file content to the session URI in a single request.
+   * This avoids the overhead of multipart encoding and lets Google optimize
+   * the transfer, resulting in significantly faster uploads for large video files.
+   */
+  private async resumableUpload(
+    file: File,
+    folderId: string,
+    onProgress?: (progress: UploadProgress) => void
+  ): Promise<UploadResult> {
+    const metadata = {
+      name: file.name,
+      mimeType: file.type,
+      parents: [folderId],
+    };
 
-      // Also share with admin if email is configured
-      if (ADMIN_EMAIL) {
-        await this.shareFileWithEmail(result.fileId, ADMIN_EMAIL, 'reader');
+    // Step 1: Initiate resumable upload session
+    const initResponse = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink,webContentLink,size',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': file.type,
+          'X-Upload-Content-Length': String(file.size),
+        },
+        body: JSON.stringify(metadata),
       }
+    );
 
-      return result;
-    } catch (error: any) {
-      console.error('❌ Upload error:', error);
-      throw new Error(`Failed to upload file: ${error.message}`);
+    if (!initResponse.ok) {
+      const errorText = await initResponse.text();
+      throw new Error(`Failed to initiate resumable upload: ${initResponse.status} ${errorText}`);
     }
+
+    const resumableUri = initResponse.headers.get('Location');
+    if (!resumableUri) {
+      throw new Error('No resumable session URI returned from Google Drive');
+    }
+
+    // Step 2: Upload the file content to the resumable session URI
+    // Using XHR for upload progress tracking (fetch API doesn't support upload progress)
+    return new Promise<UploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', resumableUri);
+
+      xhr.setRequestHeader('Content-Type', file.type);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            percentage: Math.round((event.loaded / event.total) * 100),
+          });
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          const response = JSON.parse(xhr.responseText);
+          console.log(`✅ Uploaded (resumable): ${response.name}`);
+          resolve({
+            fileId: response.id,
+            fileName: response.name,
+            webViewLink: response.webViewLink,
+            webContentLink: response.webContentLink || '',
+            size: parseInt(response.size, 10),
+          });
+        } else {
+          reject(new Error(`Resumable upload failed: ${xhr.status} ${xhr.statusText}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during resumable upload'));
+      xhr.send(file);
+    });
   }
 
   /**

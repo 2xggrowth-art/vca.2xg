@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   LinkIcon,
   FireIcon,
@@ -35,9 +36,11 @@ import {
   ExclamationTriangleIcon,
   VideoCameraIcon,
   FilmIcon,
+  UserCircleIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon } from '@heroicons/react/24/solid';
-import type { ViralAnalysis, ReviewAnalysisData, ProductionFile } from '@/types';
+import type { ViralAnalysis, ReviewAnalysisData, ProductionFile, ProfileListItem } from '@/types';
+import { contentConfigService } from '@/services/contentConfigService';
 
 type DetailType = 'pending' | 'approved' | 'shoot' | 'edit';
 
@@ -59,6 +62,8 @@ interface ApprovalDetailPanelProps {
   onRejectEdit?: () => void;
   // Files for shoot review
   shootFiles?: ProductionFile[];
+  // Files for edit review
+  editFiles?: ProductionFile[];
   isSubmitting?: boolean;
 }
 
@@ -226,17 +231,26 @@ export default function ApprovalDetailPanel({
   onApproveEdit,
   onRejectEdit,
   shootFiles = [],
+  editFiles = [],
   isSubmitting = false,
 }: ApprovalDetailPanelProps) {
   const [showRejectFeedback, setShowRejectFeedback] = useState(false);
   const [showDisapproveFeedback, setShowDisapproveFeedback] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [disapprovalReason, setDisapprovalReason] = useState('');
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [scores] = useState({
     hookStrength: 7,
     contentQuality: 7,
     viralPotential: 7,
     replicationClarity: 7,
+  });
+
+  // Fetch available profiles for optional selection during approval
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['content-config', 'profiles'],
+    queryFn: () => contentConfigService.getAllProfiles(),
+    enabled: detailType === 'pending', // Only fetch for pending scripts
   });
 
   if (!analysis) {
@@ -260,6 +274,7 @@ export default function ApprovalDetailPanel({
       onApprove({
         status: 'APPROVED',
         feedback: feedback || undefined,
+        profile_id: selectedProfileId || undefined, // Optional profile for content ID generation
         ...scores,
       });
     }
@@ -293,21 +308,32 @@ export default function ApprovalDetailPanel({
       <div className="h-full flex flex-col bg-white">
         {/* Header */}
         <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-              <VideoCameraIcon className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">Shoot Review</h2>
-              <div className="flex items-center space-x-2 mt-1">
-                <span className="text-sm font-mono font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded">
-                  {analysis.content_id || 'N/A'}
-                </span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
-                  SHOOT DONE
-                </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                <VideoCameraIcon className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Shoot Review</h2>
+                <div className="flex items-center space-x-2 mt-1">
+                  <span className="text-sm font-mono font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded">
+                    {analysis.content_id || 'N/A'}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+                    SHOOT DONE
+                  </span>
+                </div>
               </div>
             </div>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-gray-100 rounded-full transition"
+                title="Close panel"
+              >
+                <XMarkIcon className="w-5 h-5 text-gray-500" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -430,21 +456,32 @@ export default function ApprovalDetailPanel({
       <div className="h-full flex flex-col bg-white">
         {/* Header */}
         <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-pink-50">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
-              <FilmIcon className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">Edit Review</h2>
-              <div className="flex items-center space-x-2 mt-1">
-                <span className="text-sm font-mono font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
-                  {analysis.content_id || 'N/A'}
-                </span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-300">
-                  EDIT DONE
-                </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                <FilmIcon className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Edit Review</h2>
+                <div className="flex items-center space-x-2 mt-1">
+                  <span className="text-sm font-mono font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
+                    {analysis.content_id || 'N/A'}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-300">
+                    EDIT DONE
+                  </span>
+                </div>
               </div>
             </div>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-gray-100 rounded-full transition"
+                title="Close panel"
+              >
+                <XMarkIcon className="w-5 h-5 text-gray-500" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -496,6 +533,91 @@ export default function ApprovalDetailPanel({
               </a>
             </div>
           )}
+
+          {/* Edited Video Files */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Edited Video Files</h3>
+            {editFiles.length > 0 ? (
+              <div className="space-y-2">
+                {editFiles
+                  .filter((file: ProductionFile) => file.file_type === 'edited-video')
+                  .map((file: ProductionFile) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-lg hover:border-purple-300 transition"
+                    >
+                      <div className="flex items-center space-x-3 flex-1 min-w-0">
+                        <FilmIcon className="w-5 h-5 text-purple-500 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {file.file_name}
+                            </p>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                              Edited Video
+                            </span>
+                          </div>
+                          {file.description && (
+                            <p className="text-xs text-gray-500 mt-1 truncate">
+                              {file.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <a
+                        href={file.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-3 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition"
+                      >
+                        View
+                      </a>
+                    </div>
+                  ))}
+                {/* Show other files if any */}
+                {editFiles.filter((file: ProductionFile) => file.file_type !== 'edited-video').length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Other Files</p>
+                    {editFiles
+                      .filter((file: ProductionFile) => file.file_type !== 'edited-video')
+                      .map((file: ProductionFile) => (
+                        <div
+                          key={file.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition mb-2"
+                        >
+                          <div className="flex items-center space-x-3 flex-1 min-w-0">
+                            <DocumentTextIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center space-x-2">
+                                <p className="text-sm font-medium text-gray-900 truncate">
+                                  {file.file_name}
+                                </p>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                                  {file.file_type.replace(/_/g, ' ')}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <a
+                            href={file.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-3 px-3 py-1.5 text-xs font-medium text-white bg-gray-600 rounded-lg hover:bg-gray-700 transition"
+                          >
+                            View
+                          </a>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-6 bg-gray-50 rounded-lg border border-gray-200">
+                <FilmIcon className="mx-auto h-10 w-10 text-gray-400" />
+                <p className="mt-2 text-sm text-gray-500">No edited video files uploaded yet</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer Actions */}
@@ -1077,30 +1199,62 @@ export default function ApprovalDetailPanel({
       {detailType === 'pending' && (onApprove || onReject) && (
         <div className="flex-shrink-0 bg-white border-t border-gray-200 px-6 py-4">
           {!showRejectFeedback ? (
-            <div className="flex gap-3">
-              {onReject && (
-                <button
-                  onClick={() => setShowRejectFeedback(true)}
-                  className="flex-1 inline-flex justify-center items-center px-4 py-3 border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 font-medium transition"
-                >
-                  <XCircleIcon className="w-5 h-5 mr-2" />
-                  Reject
-                </button>
-              )}
-              {onApprove && (
-                <button
-                  onClick={handleApprove}
-                  disabled={isSubmitting}
-                  className="flex-1 inline-flex justify-center items-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
-                  ) : (
-                    <CheckCircleIcon className="w-5 h-5 mr-2" />
-                  )}
-                  Approve
-                </button>
-              )}
+            <div className="space-y-3">
+              {/* Optional Profile Selection */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <UserCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-blue-800 mb-2">
+                      Profile (Optional)
+                    </p>
+                    <select
+                      value={selectedProfileId}
+                      onChange={(e) => setSelectedProfileId(e.target.value)}
+                      className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    >
+                      <option value="">Let videographer choose</option>
+                      {profiles.filter((p: ProfileListItem) => p.is_active).map((profile: ProfileListItem) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-blue-600 mt-1">
+                      {selectedProfileId
+                        ? 'Content ID will be generated immediately upon approval'
+                        : 'Videographer will select profile when picking project'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                {onReject && (
+                  <button
+                    onClick={() => setShowRejectFeedback(true)}
+                    className="flex-1 inline-flex justify-center items-center px-4 py-3 border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 font-medium transition"
+                  >
+                    <XCircleIcon className="w-5 h-5 mr-2" />
+                    Reject
+                  </button>
+                )}
+                {onApprove && (
+                  <button
+                    onClick={handleApprove}
+                    disabled={isSubmitting}
+                    className="flex-1 inline-flex justify-center items-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
+                    ) : (
+                      <CheckCircleIcon className="w-5 h-5 mr-2" />
+                    )}
+                    Approve
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-3">

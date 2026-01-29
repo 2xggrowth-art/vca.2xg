@@ -161,7 +161,82 @@ export default function MultiFileUploadQueue({
     setQueuedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
-  // Upload all files
+  // Upload a single file (used by the parallel uploader)
+  const uploadSingleFile = async (
+    queuedFile: QueuedFile,
+    targetFolderId: string,
+  ): Promise<{
+    fileUrl: string;
+    fileName: string;
+    fileId: string;
+    fileType: FileTypeValue;
+  } | null> => {
+    try {
+      // Update status to uploading
+      setQueuedFiles((prev) =>
+        prev.map((f) =>
+          f.id === queuedFile.id ? { ...f, status: 'uploading', progress: 0 } : f
+        )
+      );
+
+      // Upload file with progress tracking
+      const result = await googleDriveOAuthService.uploadFile(
+        queuedFile.file,
+        targetFolderId,
+        (progressData) => {
+          setQueuedFiles((prev) =>
+            prev.map((f) =>
+              f.id === queuedFile.id ? { ...f, progress: progressData.percentage } : f
+            )
+          );
+        }
+      );
+
+      // Update status to success
+      setQueuedFiles((prev) =>
+        prev.map((f) =>
+          f.id === queuedFile.id
+            ? {
+                ...f,
+                status: 'success',
+                progress: 100,
+                uploadResult: {
+                  fileUrl: result.webViewLink,
+                  fileName: result.fileName,
+                  fileId: result.fileId,
+                },
+              }
+            : f
+        )
+      );
+
+      const completedFile = {
+        fileUrl: result.webViewLink,
+        fileName: result.fileName,
+        fileId: result.fileId,
+        fileType: queuedFile.fileType,
+      };
+
+      // Call single file complete callback if provided
+      if (onSingleFileComplete) {
+        onSingleFileComplete(completedFile);
+      }
+
+      return completedFile;
+    } catch (err: any) {
+      console.error('Upload error for file:', queuedFile.file.name, err);
+      setQueuedFiles((prev) =>
+        prev.map((f) =>
+          f.id === queuedFile.id
+            ? { ...f, status: 'error', error: err.message || 'Upload failed' }
+            : f
+        )
+      );
+      return null;
+    }
+  };
+
+  // Upload all files with parallel concurrency (up to 3 at a time)
   const handleUploadAll = async () => {
     const pendingFiles = queuedFiles.filter((f) => f.status === 'pending');
     if (pendingFiles.length === 0) return;
@@ -176,75 +251,40 @@ export default function MultiFileUploadQueue({
       fileType: FileTypeValue;
     }> = [];
 
-    for (const queuedFile of pendingFiles) {
-      try {
-        // Update status to uploading
-        setQueuedFiles((prev) =>
-          prev.map((f) =>
-            f.id === queuedFile.id ? { ...f, status: 'uploading', progress: 0 } : f
-          )
-        );
+    try {
+      // Cache folder ID once for the entire batch (avoids 3-6 redundant API calls per file)
+      const targetFolderId = await googleDriveOAuthService.getOrCreateFolderForFileType(
+        projectId,
+        driveFolder
+      );
 
-        // Get or create folder for this file type
-        const targetFolderId = await googleDriveOAuthService.getOrCreateFolderForFileType(
-          projectId,
-          driveFolder
-        );
+      // Upload up to MAX_CONCURRENT files in parallel
+      const MAX_CONCURRENT = 3;
+      const queue = [...pendingFiles];
+      const inFlight: Promise<void>[] = [];
 
-        // Upload file with progress tracking
-        const result = await googleDriveOAuthService.uploadFile(
-          queuedFile.file,
-          targetFolderId,
-          (progressData) => {
-            setQueuedFiles((prev) =>
-              prev.map((f) =>
-                f.id === queuedFile.id ? { ...f, progress: progressData.percentage } : f
-              )
-            );
-          }
-        );
+      const processNext = async (): Promise<void> => {
+        const nextFile = queue.shift();
+        if (!nextFile) return;
 
-        // Update status to success
-        setQueuedFiles((prev) =>
-          prev.map((f) =>
-            f.id === queuedFile.id
-              ? {
-                  ...f,
-                  status: 'success',
-                  progress: 100,
-                  uploadResult: {
-                    fileUrl: result.webViewLink,
-                    fileName: result.fileName,
-                    fileId: result.fileId,
-                  },
-                }
-              : f
-          )
-        );
-
-        const completedFile = {
-          fileUrl: result.webViewLink,
-          fileName: result.fileName,
-          fileId: result.fileId,
-          fileType: queuedFile.fileType,
-        };
-
-        completedFiles.push(completedFile);
-
-        // Call single file complete callback if provided
-        if (onSingleFileComplete) {
-          onSingleFileComplete(completedFile);
+        const result = await uploadSingleFile(nextFile, targetFolderId);
+        if (result) {
+          completedFiles.push(result);
         }
-      } catch (err: any) {
-        console.error('Upload error for file:', queuedFile.file.name, err);
-        setQueuedFiles((prev) =>
-          prev.map((f) =>
-            f.id === queuedFile.id
-              ? { ...f, status: 'error', error: err.message || 'Upload failed' }
-              : f
-          )
-        );
+
+        // Process next file from queue
+        await processNext();
+      };
+
+      // Start up to MAX_CONCURRENT parallel upload workers
+      for (let i = 0; i < Math.min(MAX_CONCURRENT, queue.length); i++) {
+        inFlight.push(processNext());
       }
+
+      await Promise.all(inFlight);
+    } catch (err: any) {
+      console.error('Batch upload error:', err);
+      setError(err.message || 'Upload failed');
     }
 
     setIsUploading(false);
@@ -353,71 +393,77 @@ export default function MultiFileUploadQueue({
                           : 'border-gray-200 bg-white'
                       }`}
                     >
-                      <div className="flex items-start gap-3">
-                        {/* Status icon */}
-                        <div className="flex-shrink-0 mt-1">
-                          {qf.status === 'success' ? (
-                            <CheckCircle className="w-5 h-5 text-green-600" />
-                          ) : qf.status === 'error' ? (
-                            <AlertCircle className="w-5 h-5 text-red-600" />
-                          ) : qf.status === 'uploading' ? (
-                            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                          ) : (
-                            <TypeIcon className="w-5 h-5 text-gray-400" />
+                      {/* Mobile-first layout */}
+                      <div className="flex flex-col gap-2">
+                        {/* Top row: icon, filename, remove button */}
+                        <div className="flex items-start gap-2">
+                          {/* Status icon */}
+                          <div className="flex-shrink-0 mt-0.5">
+                            {qf.status === 'success' ? (
+                              <CheckCircle className="w-5 h-5 text-green-600" />
+                            ) : qf.status === 'error' ? (
+                              <AlertCircle className="w-5 h-5 text-red-600" />
+                            ) : qf.status === 'uploading' ? (
+                              <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                            ) : (
+                              <TypeIcon className="w-5 h-5 text-gray-400" />
+                            )}
+                          </div>
+
+                          {/* File info - allow wrapping on mobile */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 break-all leading-tight">
+                              {qf.file.name}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {(qf.file.size / (1024 * 1024)).toFixed(1)} MB
+                            </p>
+                          </div>
+
+                          {/* Remove button (only for pending) */}
+                          {qf.status === 'pending' && (
+                            <button
+                              onClick={() => removeFile(qf.id)}
+                              className="flex-shrink-0 p-1 text-gray-400 hover:text-red-600 transition-colors"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
                           )}
                         </div>
 
-                        {/* File info */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {qf.file.name}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {(qf.file.size / (1024 * 1024)).toFixed(1)} MB
-                          </p>
-
-                          {/* Progress bar for uploading */}
-                          {qf.status === 'uploading' && (
-                            <div className="mt-2">
-                              <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                                <div
-                                  className="h-full bg-blue-600 transition-all duration-300"
-                                  style={{ width: `${qf.progress}%` }}
-                                />
-                              </div>
-                              <p className="text-xs text-blue-600 mt-1">{qf.progress}%</p>
-                            </div>
-                          )}
-
-                          {/* Error message */}
-                          {qf.status === 'error' && qf.error && (
-                            <p className="text-xs text-red-600 mt-1">{qf.error}</p>
-                          )}
-                        </div>
-
-                        {/* File type selector (only for pending) */}
+                        {/* File type selector row (only for pending) - full width on mobile */}
                         {qf.status === 'pending' && (
-                          <select
-                            value={qf.fileType}
-                            onChange={(e) => updateFileType(qf.id, e.target.value as FileTypeValue)}
-                            className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500"
-                          >
-                            {fileTypeOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="pl-7">
+                            <select
+                              value={qf.fileType}
+                              onChange={(e) => updateFileType(qf.id, e.target.value as FileTypeValue)}
+                              className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
+                            >
+                              {fileTypeOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         )}
 
-                        {/* Remove button (only for pending) */}
-                        {qf.status === 'pending' && (
-                          <button
-                            onClick={() => removeFile(qf.id)}
-                            className="flex-shrink-0 p-1 text-gray-400 hover:text-red-600 transition-colors"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
+                        {/* Progress bar for uploading */}
+                        {qf.status === 'uploading' && (
+                          <div className="pl-7">
+                            <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="h-full bg-blue-600 transition-all duration-300"
+                                style={{ width: `${qf.progress}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-blue-600 mt-1">{qf.progress}%</p>
+                          </div>
+                        )}
+
+                        {/* Error message */}
+                        {qf.status === 'error' && qf.error && (
+                          <p className="text-xs text-red-600 pl-7">{qf.error}</p>
                         )}
                       </div>
                     </div>

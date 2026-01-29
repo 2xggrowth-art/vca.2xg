@@ -10,4 +10,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    port: 5177,
+    hmr: {
+      // Disable overlay to prevent mobile refresh issues
+      overlay: false,
+    },
+  },
 })

@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import toast from 'react-hot-toast';
 import {
   UserGroupIcon,
   DocumentTextIcon,
@@ -11,6 +12,7 @@ import {
   TableCellsIcon,
   MagnifyingGlassIcon,
   QuestionMarkCircleIcon,
+  ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 import TableColumnFilter from '@/components/admin/TableColumnFilter';
 import SortableTableHeader from '@/components/admin/SortableTableHeader';
@@ -24,6 +26,7 @@ interface TeamMember {
   role: string;
   avatar_url?: string;
   created_at: string;
+  is_trusted_writer?: boolean;
 }
 
 interface TeamStats {
@@ -75,6 +78,7 @@ interface ScriptWriterFilters {
 
 export default function TeamMembersPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabType>('writers');
   const [selectedMember, setSelectedMember] = useState<{
     id: string;
@@ -93,6 +97,34 @@ export default function TeamMembersPage() {
     direction: SortDirection;
   }>({ field: null, direction: null });
 
+  // Mutation to update trusted writer status
+  const updateTrustedWriterMutation = useMutation({
+    mutationFn: async ({ userId, isTrusted }: { userId: string; isTrusted: boolean }) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_trusted_writer: isTrusted })
+        .eq('id', userId);
+
+      if (error) throw error;
+      return { userId, isTrusted };
+    },
+    onSuccess: ({ isTrusted }) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'team-members'] });
+      toast.success(isTrusted ? 'Writer marked as trusted' : 'Trusted status removed');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update trusted status');
+    },
+  });
+
+  const handleToggleTrustedWriter = (member: TeamMember, e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateTrustedWriterMutation.mutate({
+      userId: member.id,
+      isTrusted: !member.is_trusted_writer,
+    });
+  };
+
   const handleMemberClick = (member: TeamMember) => {
     setSelectedMember({
       id: member.id,
@@ -101,9 +133,15 @@ export default function TeamMembersPage() {
     });
   };
 
-  const handleViewAnalyses = (userId: string, e: React.MouseEvent) => {
+  const handleViewAnalyses = (userId: string, role: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/admin/analyses/by-user/${userId}`);
+    // For script writers, show scripts they submitted (user_id)
+    // For other roles, show projects assigned to them (project_assignments)
+    if (role === 'SCRIPT_WRITER') {
+      navigate(`/admin/analyses/by-user/${userId}`);
+    } else {
+      navigate(`/admin/analyses/by-user/${userId}?assignedTo=true`);
+    }
   };
 
   // Sort handler for Script Writers
@@ -512,6 +550,12 @@ export default function TeamMembersPage() {
                 currentSort={scriptWriterSort}
                 onSort={handleScriptWriterSort}
               />
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                <span className="inline-flex items-center gap-1" title="Trusted writers get auto-approved">
+                  Trusted
+                  <ShieldCheckIcon className="w-3.5 h-3.5 text-gray-400" />
+                </span>
+              </th>
               <SortableTableHeader
                 label="Total"
                 field="total"
@@ -635,7 +679,7 @@ export default function TeamMembersPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {filteredScriptWriters.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
+                <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
                   No script writers found
                 </td>
               </tr>
@@ -653,6 +697,22 @@ export default function TeamMembersPage() {
                       <span className="text-sm font-medium text-primary-600 hover:text-primary-800">
                         {member.full_name || member.email}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                      <button
+                        onClick={(e) => handleToggleTrustedWriter(member, e)}
+                        disabled={updateTrustedWriterMutation.isPending}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                          member.is_trusted_writer ? 'bg-green-500' : 'bg-gray-200'
+                        } ${updateTrustedWriterMutation.isPending ? 'opacity-50' : ''}`}
+                        title={member.is_trusted_writer ? 'Click to remove trusted status' : 'Click to mark as trusted writer'}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            member.is_trusted_writer ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                       {stats.total_submitted || 0}
@@ -681,7 +741,7 @@ export default function TeamMembersPage() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       <button
-                        onClick={(e) => handleViewAnalyses(member.id, e)}
+                        onClick={(e) => handleViewAnalyses(member.id, member.role, e)}
                         className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition"
                       >
                         <TableCellsIcon className="w-3.5 h-3.5 mr-1" />
@@ -766,7 +826,7 @@ export default function TeamMembersPage() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       <button
-                        onClick={(e) => handleViewAnalyses(member.id, e)}
+                        onClick={(e) => handleViewAnalyses(member.id, member.role, e)}
                         className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition"
                       >
                         <TableCellsIcon className="w-3.5 h-3.5 mr-1" />
@@ -851,7 +911,7 @@ export default function TeamMembersPage() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       <button
-                        onClick={(e) => handleViewAnalyses(member.id, e)}
+                        onClick={(e) => handleViewAnalyses(member.id, member.role, e)}
                         className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition"
                       >
                         <TableCellsIcon className="w-3.5 h-3.5 mr-1" />
@@ -936,7 +996,7 @@ export default function TeamMembersPage() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       <button
-                        onClick={(e) => handleViewAnalyses(member.id, e)}
+                        onClick={(e) => handleViewAnalyses(member.id, member.role, e)}
                         className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition"
                       >
                         <TableCellsIcon className="w-3.5 h-3.5 mr-1" />
@@ -1074,6 +1134,7 @@ export default function TeamMembersPage() {
         memberId={selectedMember?.id || null}
         memberName={selectedMember?.name || ''}
         memberRole={selectedMember?.role || ''}
+        onClose={() => setSelectedMember(null)}
       />
     );
   };

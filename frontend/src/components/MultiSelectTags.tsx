@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { ChevronDownIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, XMarkIcon, PencilIcon, TrashIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 interface Tag {
   id: string;
@@ -16,6 +16,10 @@ interface MultiSelectTagsProps {
   error?: string;
   allowCreate?: boolean; // Allow creating new tags by typing
   onAddCustomTag?: (tagName: string) => void; // Called when a custom tag is added (simplified)
+  // New props for edit/delete functionality
+  allowManage?: boolean; // Enable edit/delete on hover
+  onEditTag?: (id: string, newName: string) => void;
+  onDeleteTag?: (id: string) => void;
 }
 
 export default function MultiSelectTags({
@@ -28,12 +32,21 @@ export default function MultiSelectTags({
   error,
   allowCreate = false,
   onAddCustomTag,
+  allowManage = false,
+  onEditTag,
+  onDeleteTag,
 }: MultiSelectTagsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [localTags, setLocalTags] = useState<Tag[]>([]);
+  const [hoveredTagId, setHoveredTagId] = useState<string | null>(null);
+  const [managingTagId, setManagingTagId] = useState<string | null>(null);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Merge DB tags with locally created tags
   const allOptions = [...options, ...localTags];
@@ -43,6 +56,9 @@ export default function MultiSelectTags({
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
+        setManagingTagId(null);
+        setEditingTagId(null);
+        setConfirmDeleteId(null);
       }
     };
 
@@ -56,6 +72,14 @@ export default function MultiSelectTags({
       searchInputRef.current.focus();
     }
   }, [isOpen]);
+
+  // Auto-focus edit input when editing
+  useEffect(() => {
+    if (editingTagId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingTagId]);
 
   const toggleTag = (tagId: string) => {
     if (selectedIds.includes(tagId)) {
@@ -109,6 +133,44 @@ export default function MultiSelectTags({
       toggleTag(exactMatch.id);
       setSearchTerm('');
     }
+  };
+
+  // Handle edit submission
+  const handleEditSubmit = (tagId: string) => {
+    if (editingName.trim() && onEditTag) {
+      onEditTag(tagId, editingName.trim());
+    }
+    setEditingTagId(null);
+    setEditingName('');
+    setManagingTagId(null);
+  };
+
+  // Handle delete confirmation
+  const handleDeleteConfirm = (tagId: string) => {
+    if (onDeleteTag) {
+      onDeleteTag(tagId);
+      // Remove from selected if it was selected
+      if (selectedIds.includes(tagId)) {
+        onChange(selectedIds.filter(id => id !== tagId));
+      }
+    }
+    setConfirmDeleteId(null);
+    setManagingTagId(null);
+  };
+
+  // Start editing a tag
+  const startEditing = (tag: Tag, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingTagId(tag.id);
+    setEditingName(tag.name);
+    setManagingTagId(null);
+  };
+
+  // Start delete confirmation
+  const startDelete = (tagId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmDeleteId(tagId);
+    setManagingTagId(null);
   };
 
   return (
@@ -182,20 +244,147 @@ export default function MultiSelectTags({
           {/* Options List */}
           <div className="max-h-48 overflow-y-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map(option => (
-                <label
-                  key={option.id}
-                  className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(option.id)}
-                    onChange={() => toggleTag(option.id)}
-                    className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                  />
-                  <span className="ml-3 text-sm text-gray-900">{option.name}</span>
-                </label>
-              ))
+              filteredOptions.map(option => {
+                const isCustomTag = option.id.startsWith('custom-');
+                const showManageMenu = allowManage && !isCustomTag && managingTagId === option.id;
+                const isEditing = editingTagId === option.id;
+                const isConfirmingDelete = confirmDeleteId === option.id;
+
+                return (
+                  <div
+                    key={option.id}
+                    className="relative"
+                    onMouseEnter={() => setHoveredTagId(option.id)}
+                    onMouseLeave={() => {
+                      setHoveredTagId(null);
+                      // Don't close manage menu if it's open
+                      if (!showManageMenu && !isEditing && !isConfirmingDelete) {
+                        setManagingTagId(null);
+                      }
+                    }}
+                  >
+                    {isEditing ? (
+                      // Edit mode
+                      <div className="flex items-center px-3 py-2 gap-2 bg-yellow-50">
+                        <input
+                          ref={editInputRef}
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleEditSubmit(option.id);
+                            } else if (e.key === 'Escape') {
+                              setEditingTagId(null);
+                              setEditingName('');
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 px-2 py-1 text-sm border border-yellow-400 rounded focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditSubmit(option.id);
+                          }}
+                          className="p-1 text-green-600 hover:bg-green-100 rounded"
+                        >
+                          <CheckIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTagId(null);
+                            setEditingName('');
+                          }}
+                          className="p-1 text-gray-500 hover:bg-gray-100 rounded"
+                        >
+                          <XMarkIcon className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : isConfirmingDelete ? (
+                      // Delete confirmation mode
+                      <div className="flex items-center justify-between px-3 py-2 bg-red-50">
+                        <span className="text-sm text-red-700">Delete "{option.name}"?</span>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteConfirm(option.id);
+                            }}
+                            className="px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteId(null);
+                            }}
+                            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      // Normal view
+                      <label className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer transition-colors group">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(option.id)}
+                          onChange={() => toggleTag(option.id)}
+                          className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-900 flex-1">{option.name}</span>
+
+                        {/* Manage button - shows on hover */}
+                        {allowManage && !isCustomTag && hoveredTagId === option.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setManagingTagId(managingTagId === option.id ? null : option.id);
+                            }}
+                            className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded transition-colors"
+                            title="Manage tag"
+                          >
+                            <ChevronDownIcon className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* Manage dropdown menu */}
+                        {showManageMenu && (
+                          <div className="absolute right-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 min-w-[100px]">
+                            <button
+                              type="button"
+                              onClick={(e) => startEditing(option, e)}
+                              className="w-full flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              <PencilIcon className="w-4 h-4 mr-2" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => startDelete(option.id, e)}
+                              className="w-full flex items-center px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                            >
+                              <TrashIcon className="w-4 h-4 mr-2" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                );
+              })
             ) : searchTerm && allowCreate ? (
               <div className="px-3 py-4 text-center">
                 <p className="text-sm text-gray-600 mb-2">No matching tags found</p>

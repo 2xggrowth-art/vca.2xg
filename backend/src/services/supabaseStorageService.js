@@ -15,23 +15,34 @@ class SupabaseStorageService {
   }
 
   /**
-   * Ensure bucket exists
+   * Ensure bucket exists and is public
    */
   async ensureBucket() {
     try {
       const { data, error } = await this.supabase.storage.getBucket(this.bucket);
 
       if (error && error.message.includes('not found')) {
-        // Create bucket if it doesn't exist
+        // Create bucket if it doesn't exist - make it PUBLIC
         const { error: createError } = await this.supabase.storage.createBucket(this.bucket, {
-          public: false,
+          public: true, // Public bucket so files are accessible without signed URLs
           fileSizeLimit: 524288000, // 500MB
         });
 
         if (createError) {
           console.error('Error creating bucket:', createError);
         } else {
-          console.log('✅ Created Supabase Storage bucket:', this.bucket);
+          console.log('✅ Created Supabase Storage bucket (public):', this.bucket);
+        }
+      } else if (data && !data.public) {
+        // Bucket exists but is private - update to public
+        const { error: updateError } = await this.supabase.storage.updateBucket(this.bucket, {
+          public: true,
+        });
+
+        if (updateError) {
+          console.error('Error updating bucket to public:', updateError);
+        } else {
+          console.log('✅ Updated bucket to public:', this.bucket);
         }
       }
     } catch (error) {
@@ -73,15 +84,13 @@ class SupabaseStorageService {
 
       console.log(`✅ Uploaded: ${filePath}`);
 
-      // Get signed URL for private bucket (24 hours expiry)
-      const { data: signedUrlData, error: urlError } = await this.supabase.storage
+      // Get public URL for the file (no expiry)
+      const { data: publicUrlData } = this.supabase.storage
         .from(this.bucket)
-        .createSignedUrl(filePath, 86400); // 24 hours in seconds
-
-      if (urlError) throw urlError;
+        .getPublicUrl(filePath);
 
       return {
-        fileUrl: signedUrlData.signedUrl,
+        fileUrl: publicUrlData.publicUrl,
         filePath: data.path,
         fileName: fileNameWithProject,
       };

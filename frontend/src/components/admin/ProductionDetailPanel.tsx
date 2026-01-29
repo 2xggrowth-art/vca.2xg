@@ -25,6 +25,9 @@ import {
   ChartBarIcon,
   PencilIcon,
   LinkIcon,
+  DocumentIcon,
+  ArrowDownTrayIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 
 interface ProductionDetailPanelProps {
@@ -59,14 +62,14 @@ export default function ProductionDetailPanel({
     profileId: string;
     hookTagIds: string[];
     characterTagIds: string[];
-    totalPeopleInvolved: number;
+    totalPeopleInvolved: number | undefined;
     shootPossibility: 25 | 50 | 75 | 100 | undefined;
   }>({
     industryId: '',
     profileId: '',
     hookTagIds: [],
     characterTagIds: [],
-    totalPeopleInvolved: 1,
+    totalPeopleInvolved: undefined,
     shootPossibility: undefined,
   });
   const [showDisapproveForm, setShowDisapproveForm] = useState(false);
@@ -189,6 +192,24 @@ export default function ProductionDetailPanel({
     enabled: showAssignTeam,
   });
 
+  // Fetch production files for this analysis
+  const { data: productionFiles = [] } = useQuery({
+    queryKey: ['production-files', analysis?.id],
+    queryFn: async () => {
+      if (!analysis?.id) return [];
+      const { data, error } = await supabase
+        .from('production_files')
+        .select('*')
+        .eq('analysis_id', analysis.id)
+        .eq('is_deleted', false)
+        .order('uploaded_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!analysis?.id,
+  });
+
   // Assignment mutation
   const assignMutation = useMutation({
     mutationFn: (data: AssignTeamData) =>
@@ -220,6 +241,22 @@ export default function ProductionDetailPanel({
         .eq('id', analysis!.id);
 
       if (updateError) throw updateError;
+
+      // If profile is being set and content_id doesn't exist yet, generate it
+      if (data.profileId && !currentAnalysis?.content_id) {
+        try {
+          const { error: rpcError } = await supabase.rpc('generate_content_id_on_approval', {
+            p_analysis_id: analysis!.id,
+            p_profile_id: data.profileId,
+          });
+          if (rpcError) {
+            console.error('Failed to generate content_id:', rpcError);
+            // Don't throw - the update was successful, content ID can be generated later
+          }
+        } catch (err) {
+          console.error('Error calling generate_content_id_on_approval:', err);
+        }
+      }
 
       // Handle hook tags - first create any custom tags
       const resolvedHookTagIds: string[] = [];
@@ -308,6 +345,56 @@ export default function ProductionDetailPanel({
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to save production details');
+    },
+  });
+
+  // Update hook tag mutation
+  const updateHookTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateHookTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag updated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update hook tag');
+    },
+  });
+
+  // Delete hook tag mutation
+  const deleteHookTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteHookTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete hook tag');
+    },
+  });
+
+  // Update character tag mutation
+  const updateCharacterTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateCharacterTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag updated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update character tag');
+    },
+  });
+
+  // Delete character tag mutation
+  const deleteCharacterTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteCharacterTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete character tag');
     },
   });
 
@@ -818,6 +905,9 @@ export default function ProductionDetailPanel({
                   placeholder="Select hook types..."
                   allowCreate={true}
                   onAddCustomTag={(tagName) => console.log('Custom hook tag:', tagName)}
+                  allowManage
+                  onEditTag={(id, newName) => updateHookTagMutation.mutate({ id, name: newName })}
+                  onDeleteTag={(id) => deleteHookTagMutation.mutate(id)}
                 />
               </div>
 
@@ -831,6 +921,9 @@ export default function ProductionDetailPanel({
                   placeholder="Select characters..."
                   allowCreate={true}
                   onAddCustomTag={(tagName) => console.log('Custom character tag:', tagName)}
+                  allowManage
+                  onEditTag={(id, newName) => updateCharacterTagMutation.mutate({ id, name: newName })}
+                  onDeleteTag={(id) => deleteCharacterTagMutation.mutate(id)}
                 />
               </div>
 
@@ -842,11 +935,20 @@ export default function ProductionDetailPanel({
                     People Involved
                   </label>
                   <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={productionDetailsData.totalPeopleInvolved}
-                    onChange={(e) => setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: parseInt(e.target.value) || 1 })}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Enter"
+                    value={productionDetailsData.totalPeopleInvolved ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val === '') {
+                        setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: undefined });
+                      } else {
+                        const num = parseInt(val);
+                        setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: Math.min(Math.max(num, 1), 50) });
+                      }
+                    }}
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
@@ -932,7 +1034,7 @@ export default function ProductionDetailPanel({
                   <p className="text-xs text-gray-500 font-medium">Videographer</p>
                   <p className="text-sm text-gray-900">
                     {currentAnalysis.videographer?.full_name || currentAnalysis.videographer?.email || (
-                      <span className="text-red-600 font-medium">Unassigned</span>
+                      <span className="text-gray-400">Not assigned</span>
                     )}
                   </p>
                 </div>
@@ -1132,6 +1234,77 @@ export default function ProductionDetailPanel({
             >
               {currentAnalysis.reference_url}
             </a>
+          </section>
+        )}
+
+        {/* Production Files */}
+        {productionFiles.length > 0 && (
+          <section className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
+              <DocumentIcon className="w-4 h-4 mr-1.5 text-indigo-600" />
+              Production Files
+              <span className="ml-2 px-1.5 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-700">
+                {productionFiles.length}
+              </span>
+            </h3>
+            <div className="space-y-2">
+              {productionFiles.map((file: any) => {
+                const fileTypeLabel = file.file_type === 'raw-footage' ? 'Raw Footage' :
+                                      file.file_type === 'edited-video' ? 'Edited Video' :
+                                      file.file_type === 'final-video' ? 'Final Video' :
+                                      file.file_type;
+                const fileTypeColor = file.file_type === 'raw-footage' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                                      file.file_type === 'edited-video' ? 'bg-purple-100 text-purple-700 border-purple-200' :
+                                      file.file_type === 'final-video' ? 'bg-green-100 text-green-700 border-green-200' :
+                                      'bg-gray-100 text-gray-700 border-gray-200';
+
+                return (
+                  <div key={file.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg border border-gray-100">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${fileTypeColor}`}>
+                          {fileTypeLabel}
+                        </span>
+                        {file.tags && file.tags.length > 0 && (
+                          <div className="flex gap-1">
+                            {file.tags.map((tag: string, idx: number) => (
+                              <span key={idx} className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 border border-amber-200">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-900 truncate" title={file.file_name}>
+                        {file.file_name}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(file.uploaded_at).toLocaleDateString()} at {new Date(file.uploaded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 ml-2">
+                      <a
+                        href={file.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition"
+                        title="View file"
+                      >
+                        <EyeIcon className="w-4 h-4" />
+                      </a>
+                      <a
+                        href={file.file_url}
+                        download={file.file_name}
+                        className="p-1.5 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition"
+                        title="Download file"
+                      >
+                        <ArrowDownTrayIcon className="w-4 h-4" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </section>
         )}
 

@@ -3,13 +3,27 @@ import { useSearchParams } from 'react-router-dom';
 import { assignmentService } from '@/services/assignmentService';
 import { productionFilesService } from '@/services/productionFilesService';
 import { editorQueueService } from '@/services/editorQueueService';
-import { FilmIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, ArrowDownTrayIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, ArrowPathIcon, InboxIcon, FolderOpenIcon } from '@heroicons/react/24/outline';
+import { FilmIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon, DocumentIcon, ArrowDownTrayIcon, MagnifyingGlassIcon, XMarkIcon, FunnelIcon, ArrowPathIcon, InboxIcon, FolderOpenIcon, UserGroupIcon } from '@heroicons/react/24/outline';
 import { useState, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { googleDriveOAuthService } from '@/services/googleDriveOAuthService';
-import type { ViralAnalysis, UpdateProductionStageData, ProductionFile } from '@/types';
+import type { ViralAnalysis, UpdateProductionStageData, ProductionFile, CastComposition } from '@/types';
 import { UserRole, ProductionStageV2 } from '@/types';
+
+const getCastSummaryParts = (cast: CastComposition): string[] => {
+  const parts: string[] = [];
+  if (cast.man) parts.push(`${cast.man} Men`);
+  if (cast.woman) parts.push(`${cast.woman} Women`);
+  if (cast.boy) parts.push(`${cast.boy} Boys`);
+  if (cast.girl) parts.push(`${cast.girl} Girls`);
+  if (cast.teen_boy) parts.push(`${cast.teen_boy} Teen Boys`);
+  if (cast.teen_girl) parts.push(`${cast.teen_girl} Teen Girls`);
+  if (cast.senior_man) parts.push(`${cast.senior_man} Sr. Men`);
+  if (cast.senior_woman) parts.push(`${cast.senior_woman} Sr. Women`);
+  if (cast.include_owner) parts.push('+ Owner');
+  return parts;
+};
 import MultiFileUploadQueue, { EDITOR_FILE_TYPES } from '@/components/MultiFileUploadQueue';
 import BottomNavigation from '@/components/BottomNavigation';
 import ProjectCard from '@/components/ProjectCard';
@@ -43,18 +57,35 @@ export default function EditorDashboard() {
       setZipProgress(`Preparing 0/${files.length} files...`);
       const zip = new JSZip();
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setZipProgress(`Downloading ${i + 1}/${files.length}: ${file.file_name}`);
+      // Download files in parallel batches of 3 for speed
+      const MAX_CONCURRENT = 3;
+      let completedCount = 0;
+      const queue = [...files];
+
+      const downloadNext = async (): Promise<void> => {
+        const file = queue.shift();
+        if (!file) return;
 
         try {
+          setZipProgress(`Downloading ${completedCount + 1}/${files.length}: ${file.file_name}`);
           const blob = await googleDriveOAuthService.downloadFileAsBlob(file.file_id);
           zip.file(file.file_name, blob);
         } catch (err) {
           console.error(`Failed to download ${file.file_name}:`, err);
           toast.error(`Failed to download: ${file.file_name}`);
         }
+
+        completedCount++;
+        // Process next file from queue
+        await downloadNext();
+      };
+
+      // Start up to MAX_CONCURRENT parallel download workers
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < Math.min(MAX_CONCURRENT, queue.length); i++) {
+        workers.push(downloadNext());
       }
+      await Promise.all(workers);
 
       setZipProgress('Creating zip...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
@@ -719,6 +750,75 @@ export default function EditorDashboard() {
                           <p className="text-gray-800 whitespace-pre-wrap">{selectedAnalysis.admin_remarks}</p>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Production Details Section */}
+                  {(selectedAnalysis.profile || selectedAnalysis.industry ||
+                    selectedAnalysis.hook_tags?.length || selectedAnalysis.character_tags?.length ||
+                    (selectedAnalysis.cast_composition && (selectedAnalysis.cast_composition as CastComposition).total > 0)) && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                      <h3 className="text-sm font-semibold text-indigo-800 uppercase tracking-wide mb-3">Production Details</h3>
+
+                      {/* Profile & Industry Row */}
+                      <div className="grid grid-cols-2 gap-4 mb-3">
+                        {selectedAnalysis.profile && (
+                          <div>
+                            <span className="text-xs text-gray-500 block">Profile</span>
+                            <span className="text-sm font-medium text-gray-900">{selectedAnalysis.profile.name}</span>
+                          </div>
+                        )}
+                        {selectedAnalysis.industry && (
+                          <div>
+                            <span className="text-xs text-gray-500 block">Industry</span>
+                            <span className="text-sm font-medium text-gray-900">{selectedAnalysis.industry.name}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Cast Composition */}
+                      {selectedAnalysis.cast_composition && (selectedAnalysis.cast_composition as CastComposition).total > 0 && (
+                        <div className="mb-3 p-2.5 bg-white border border-indigo-100 rounded-lg">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <UserGroupIcon className="w-4 h-4 text-indigo-600" />
+                            <span className="text-xs font-semibold text-indigo-800">
+                              Cast: {(selectedAnalysis.cast_composition as CastComposition).total} people
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {getCastSummaryParts(selectedAnalysis.cast_composition as CastComposition).map((part) => (
+                              <span
+                                key={part}
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700"
+                              >
+                                {part}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tags */}
+                      {(selectedAnalysis.hook_tags?.length || selectedAnalysis.character_tags?.length) && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedAnalysis.hook_tags?.map((tag: any) => (
+                            <span
+                              key={tag.id}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700"
+                            >
+                              {tag.name}
+                            </span>
+                          ))}
+                          {selectedAnalysis.character_tags?.map((tag: any) => (
+                            <span
+                              key={tag.id}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal-100 text-teal-700"
+                            >
+                              {tag.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 

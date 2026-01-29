@@ -13,6 +13,7 @@ import {
   VideoCameraIcon,
   FilmIcon,
   MegaphoneIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 import type { ViralAnalysis } from '@/types';
 
@@ -20,12 +21,14 @@ interface TeamMemberDetailPanelProps {
   memberId: string | null;
   memberName: string;
   memberRole: string;
+  onClose?: () => void;
 }
 
 export default function TeamMemberDetailPanel({
   memberId,
   memberName,
   memberRole,
+  onClose,
 }: TeamMemberDetailPanelProps) {
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
@@ -246,17 +249,28 @@ export default function TeamMemberDetailPanel({
       <div
         className={`flex-shrink-0 px-6 py-4 border-b border-gray-200 bg-gradient-to-r ${getRoleBgColor()}`}
       >
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
-            {getRoleIcon()}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
+              {getRoleIcon()}
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">{memberName}</h2>
+              <p className="text-sm text-gray-600">
+                {formatRoleName(memberRole)} • {projects.length} project
+                {projects.length !== 1 ? 's' : ''}
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">{memberName}</h2>
-            <p className="text-sm text-gray-600">
-              {formatRoleName(memberRole)} • {projects.length} project
-              {projects.length !== 1 ? 's' : ''}
-            </p>
-          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-black/10 rounded-full transition"
+              title="Close panel"
+            >
+              <XMarkIcon className="w-5 h-5 text-gray-600" />
+            </button>
+          )}
         </div>
       </div>
 

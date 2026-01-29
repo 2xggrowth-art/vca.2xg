@@ -61,14 +61,14 @@ export default function ProductionDetailDrawer({
     profileId: string;
     hookTagIds: string[];
     characterTagIds: string[];
-    totalPeopleInvolved: number;
+    totalPeopleInvolved: number | undefined;
     shootPossibility: 25 | 50 | 75 | 100 | undefined;
   }>({
     industryId: '',
     profileId: '',
     hookTagIds: [],
     characterTagIds: [],
-    totalPeopleInvolved: 1,
+    totalPeopleInvolved: undefined,
     shootPossibility: undefined,
   });
 
@@ -257,6 +257,56 @@ export default function ProductionDetailDrawer({
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to save production details');
+    },
+  });
+
+  // Update hook tag mutation
+  const updateHookTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateHookTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag updated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update hook tag');
+    },
+  });
+
+  // Delete hook tag mutation
+  const deleteHookTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteHookTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hook-tags'] });
+      toast.success('Hook tag deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete hook tag');
+    },
+  });
+
+  // Update character tag mutation
+  const updateCharacterTagMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      contentConfigService.updateCharacterTag(id, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag updated!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update character tag');
+    },
+  });
+
+  // Delete character tag mutation
+  const deleteCharacterTagMutation = useMutation({
+    mutationFn: (id: string) => contentConfigService.deleteCharacterTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
+      toast.success('Character tag deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to delete character tag');
     },
   });
 
@@ -608,6 +658,9 @@ export default function ProductionDetailDrawer({
                         onAddCustomTag={(tagName) => {
                           console.log('Custom hook tag added:', tagName);
                         }}
+                        allowManage
+                        onEditTag={(id, newName) => updateHookTagMutation.mutate({ id, name: newName })}
+                        onDeleteTag={(id) => deleteHookTagMutation.mutate(id)}
                       />
                     </div>
 
@@ -623,6 +676,9 @@ export default function ProductionDetailDrawer({
                         onAddCustomTag={(tagName) => {
                           console.log('Custom character tag added:', tagName);
                         }}
+                        allowManage
+                        onEditTag={(id, newName) => updateCharacterTagMutation.mutate({ id, name: newName })}
+                        onDeleteTag={(id) => deleteCharacterTagMutation.mutate(id)}
                       />
                     </div>
 
@@ -634,11 +690,20 @@ export default function ProductionDetailDrawer({
                           Total People Involved
                         </label>
                         <input
-                          type="number"
-                          min={1}
-                          max={50}
-                          value={productionDetailsData.totalPeopleInvolved}
-                          onChange={(e) => setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: parseInt(e.target.value) || 1 })}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          placeholder="Enter number"
+                          value={productionDetailsData.totalPeopleInvolved ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            if (val === '') {
+                              setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: undefined });
+                            } else {
+                              const num = parseInt(val);
+                              setProductionDetailsData({ ...productionDetailsData, totalPeopleInvolved: Math.min(Math.max(num, 1), 50) });
+                            }
+                          }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition text-sm"
                         />
                       </div>

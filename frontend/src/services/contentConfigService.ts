@@ -145,9 +145,11 @@ export const contentConfigService = {
   },
 
   async deleteProfile(id: string): Promise<void> {
+    // Soft delete - set is_active to false instead of hard delete
+    // This avoids foreign key constraint violations when profiles are in use
     const { error } = await supabase
       .from('profile_list')
-      .delete()
+      .update({ is_active: false })
       .eq('id', id);
 
     if (error) throw error;

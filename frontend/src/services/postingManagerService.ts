@@ -176,6 +176,7 @@ export const postingManagerService = {
 
   /**
    * Mark project as posted with the live URL
+   * If keepInQueue is true, clears posting details for next platform while keeping project in queue
    */
   async markAsPosted(data: MarkAsPostedData): Promise<ViralAnalysis> {
     const { data: { user } } = await supabase.auth.getUser();
@@ -193,17 +194,51 @@ export const postingManagerService = {
       throw new Error('Please enter a valid URL');
     }
 
-    const { error } = await supabase
-      .from('viral_analyses')
-      .update({
-        production_stage: 'POSTED',
-        posted_url: data.postedUrl,
-        posted_at: new Date().toISOString(),
-        production_completed_at: new Date().toISOString(),
-      })
-      .eq('id', data.analysisId);
+    if (data.keepInQueue) {
+      // Keep project in queue for posting to more platforms
+      // Store this post URL in posted_urls array and clear posting details
+      const { data: currentProject } = await supabase
+        .from('viral_analyses')
+        .select('posted_urls')
+        .eq('id', data.analysisId)
+        .single();
 
-    if (error) throw error;
+      // Append to posted_urls array (JSONB field tracking all platform posts)
+      const existingUrls = currentProject?.posted_urls || [];
+      const newPost = {
+        url: data.postedUrl,
+        posted_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from('viral_analyses')
+        .update({
+          // Keep production_stage as READY_TO_POST
+          posted_urls: [...existingUrls, newPost],
+          // Clear posting details for next platform setup
+          posting_platform: null,
+          posting_caption: null,
+          posting_heading: null,
+          posting_hashtags: null,
+          scheduled_post_time: null,
+        })
+        .eq('id', data.analysisId);
+
+      if (error) throw error;
+    } else {
+      // Final post - move to POSTED stage
+      const { error } = await supabase
+        .from('viral_analyses')
+        .update({
+          production_stage: 'POSTED',
+          posted_url: data.postedUrl,
+          posted_at: new Date().toISOString(),
+          production_completed_at: new Date().toISOString(),
+        })
+        .eq('id', data.analysisId);
+
+      if (error) throw error;
+    }
 
     return this.getProjectById(data.analysisId);
   },

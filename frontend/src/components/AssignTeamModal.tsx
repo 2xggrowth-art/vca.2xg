@@ -46,10 +46,10 @@ export default function AssignTeamModal({
     videographerId: analysis.videographer?.id,
     editorId: analysis.editor?.id,
     postingManagerId: analysis.posting_manager?.id,
-    // Auto-assign videographer and posting manager only; editors self-pick from queue
-    autoAssignVideographer: !analysis.videographer?.id,
+    // All roles self-pick from queue - no auto-assign
+    autoAssignVideographer: false,
     autoAssignEditor: false,
-    autoAssignPostingManager: !analysis.posting_manager?.id,
+    autoAssignPostingManager: false,
     // Production Details
     industryId: analysis.industry_id || '',
     profileId: analysis.profile_id || '',
@@ -68,10 +68,10 @@ export default function AssignTeamModal({
         videographerId: analysis.videographer?.id,
         editorId: analysis.editor?.id,
         postingManagerId: analysis.posting_manager?.id,
-        // Auto-assign videographer and posting manager only; editors self-pick from queue
-        autoAssignVideographer: !analysis.videographer?.id,
+        // All roles self-pick from queue - no auto-assign
+        autoAssignVideographer: false,
         autoAssignEditor: false,
-        autoAssignPostingManager: !analysis.posting_manager?.id,
+        autoAssignPostingManager: false,
         // Production Details - industryId will be auto-set when industries load
         industryId: analysis.industry_id || '',
         profileId: analysis.profile_id || '',
@@ -275,18 +275,7 @@ export default function AssignTeamModal({
       return;
     }
 
-    // Validate at least one team member is assigned
-    if (
-      !formData.videographerId &&
-      !formData.editorId &&
-      !formData.postingManagerId &&
-      !formData.autoAssignVideographer &&
-      !formData.autoAssignEditor &&
-      !formData.autoAssignPostingManager
-    ) {
-      toast.error('Please assign at least one team member');
-      return;
-    }
+    // Team assignment is optional - all roles self-pick from queue
 
     assignMutation.mutate(formData);
   };

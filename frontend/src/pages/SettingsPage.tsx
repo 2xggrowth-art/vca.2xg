@@ -20,82 +20,90 @@ import {
 import { UserRole } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { adminUserService } from '@/services/adminUserService';
+import BottomNavigation from '@/components/BottomNavigation';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<'team' | 'drive' | 'fields' | 'formBuilder'>('team');
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen bg-gray-50 pb-20 md:pb-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-4 py-4 md:px-6">
         <div className="flex items-center">
-          <Cog6ToothIcon className="w-8 h-8 text-primary-600 mr-3" />
+          <Cog6ToothIcon className="w-6 h-6 md:w-8 md:h-8 text-primary-600 mr-2 md:mr-3" />
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-            <p className="mt-1 text-gray-600">
+            <h1 className="text-xl md:text-3xl font-bold text-gray-900">Settings</h1>
+            <p className="hidden md:block mt-1 text-gray-600">
               Manage team members and configure Google Drive integration
             </p>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200 bg-white rounded-t-lg">
-        <div className="flex space-x-1 px-6">
+      {/* Tabs - Horizontal Scrollable on Mobile */}
+      <div className="bg-white border-b border-gray-200 overflow-x-auto">
+        <div className="flex min-w-max px-2 md:px-6">
           <button
             onClick={() => setActiveTab('team')}
-            className={`flex items-center px-6 py-4 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium border-b-2 transition whitespace-nowrap ${
               activeTab === 'team'
                 ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            <UserPlusIcon className="w-5 h-5 mr-2" />
-            Team Management
+            <UserPlusIcon className="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" />
+            <span className="hidden md:inline">Team Management</span>
+            <span className="md:hidden">Team</span>
           </button>
           <button
             onClick={() => setActiveTab('drive')}
-            className={`flex items-center px-6 py-4 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium border-b-2 transition whitespace-nowrap ${
               activeTab === 'drive'
                 ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            <CloudIcon className="w-5 h-5 mr-2" />
-            Google Drive Settings
+            <CloudIcon className="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" />
+            <span className="hidden md:inline">Google Drive</span>
+            <span className="md:hidden">Drive</span>
           </button>
           <button
             onClick={() => setActiveTab('fields')}
-            className={`flex items-center px-6 py-4 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium border-b-2 transition whitespace-nowrap ${
               activeTab === 'fields'
                 ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            <DocumentTextIcon className="w-5 h-5 mr-2" />
-            Dropdown Options
+            <DocumentTextIcon className="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" />
+            <span className="hidden md:inline">Dropdown Options</span>
+            <span className="md:hidden">Dropdowns</span>
           </button>
           <button
             onClick={() => setActiveTab('formBuilder')}
-            className={`flex items-center px-6 py-4 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium border-b-2 transition whitespace-nowrap ${
               activeTab === 'formBuilder'
                 ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            <WrenchScrewdriverIcon className="w-5 h-5 mr-2" />
-            Form Builder
+            <WrenchScrewdriverIcon className="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" />
+            <span className="hidden md:inline">Form Builder</span>
+            <span className="md:hidden">Form</span>
           </button>
         </div>
       </div>
 
       {/* Content */}
-      <div className="bg-white rounded-b-lg shadow-sm">
+      <div className="bg-white md:mx-4 md:mt-4 md:rounded-lg md:shadow-sm">
         {activeTab === 'team' && <TeamManagement />}
         {activeTab === 'drive' && <GoogleDriveSettings />}
         {activeTab === 'fields' && <ScriptIdeaFieldsManagement />}
         {activeTab === 'formBuilder' && <FormBuilderManagement />}
       </div>
+
+      {/* Bottom Navigation (Mobile) */}
+      <BottomNavigation role={UserRole.SUPER_ADMIN} />
     </div>
   );
 }
@@ -215,21 +223,21 @@ function TeamManagement() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       {/* Header with Add Button */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Team Members</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Manage user accounts and roles for your organization
+          <h2 className="text-lg md:text-xl font-semibold text-gray-900">Team Members</h2>
+          <p className="text-xs md:text-sm text-gray-600 mt-1">
+            Manage user accounts and roles
           </p>
         </div>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
+          className="inline-flex items-center justify-center px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition text-sm font-medium"
         >
           <UserPlusIcon className="w-5 h-5 mr-2" />
-          Add Team Member
+          Add Member
         </button>
       </div>
 
@@ -327,32 +335,104 @@ function TeamManagement() {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
           </div>
         ) : teamMembers && teamMembers.length > 0 ? (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Member
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Email
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Joined
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+          <>
+            {/* Desktop Table */}
+            <table className="hidden md:table min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Member
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Email
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Role
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Joined
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {teamMembers.map((member) => (
+                  <tr key={member.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
+                          {member.avatar_url ? (
+                            <img
+                              src={member.avatar_url}
+                              alt={member.full_name || member.email}
+                              className="w-10 h-10 rounded-full"
+                            />
+                          ) : (
+                            <UserCircleIcon className="w-6 h-6 text-primary-600" />
+                          )}
+                        </div>
+                        <div className="ml-4">
+                          <div className="text-sm font-medium text-gray-900">
+                            {member.full_name || 'No name'}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{member.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {member.role === 'SUPER_ADMIN' ? (
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getRoleBadgeColor(
+                            member.role
+                          )}`}
+                        >
+                          {member.role.replace('_', ' ')}
+                        </span>
+                      ) : (
+                        <select
+                          value={member.role}
+                          onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
+                          disabled={updateUserRoleMutation.isPending}
+                          className="text-sm border border-gray-300 rounded-lg px-3 py-1 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50"
+                        >
+                          <option value={UserRole.VIDEOGRAPHER}>Videographer</option>
+                          <option value={UserRole.EDITOR}>Editor</option>
+                          <option value={UserRole.POSTING_MANAGER}>Posting Manager</option>
+                          <option value={UserRole.SCRIPT_WRITER}>Script Writer</option>
+                          <option value={UserRole.CREATOR}>Creator</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(member.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      {member.role !== 'SUPER_ADMIN' && (
+                        <button
+                          onClick={() => handleDelete(member.id, member.full_name || member.email)}
+                          disabled={deleteUserMutation.isPending}
+                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                        >
+                          <TrashIcon className="w-5 h-5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Mobile Card List */}
+            <div className="md:hidden divide-y divide-gray-200">
               {teamMembers.map((member) => (
-                <tr key={member.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
+                <div key={member.id} className="p-4 hover:bg-gray-50">
+                  <div className="flex items-start justify-between">
                     <div className="flex items-center">
-                      <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
                         {member.avatar_url ? (
                           <img
                             src={member.avatar_url}
@@ -363,17 +443,26 @@ function TeamManagement() {
                           <UserCircleIcon className="w-6 h-6 text-primary-600" />
                         )}
                       </div>
-                      <div className="ml-4">
+                      <div className="ml-3">
                         <div className="text-sm font-medium text-gray-900">
                           {member.full_name || 'No name'}
                         </div>
+                        <div className="text-xs text-gray-500 truncate max-w-[180px]">
+                          {member.email}
+                        </div>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{member.email}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                    {member.role !== 'SUPER_ADMIN' && (
+                      <button
+                        onClick={() => handleDelete(member.id, member.full_name || member.email)}
+                        disabled={deleteUserMutation.isPending}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                      >
+                        <TrashIcon className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
                     {member.role === 'SUPER_ADMIN' ? (
                       <span
                         className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getRoleBadgeColor(
@@ -387,7 +476,7 @@ function TeamManagement() {
                         value={member.role}
                         onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
                         disabled={updateUserRoleMutation.isPending}
-                        className="text-sm border border-gray-300 rounded-lg px-3 py-1 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50"
+                        className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50"
                       >
                         <option value={UserRole.VIDEOGRAPHER}>Videographer</option>
                         <option value={UserRole.EDITOR}>Editor</option>
@@ -396,25 +485,14 @@ function TeamManagement() {
                         <option value={UserRole.CREATOR}>Creator</option>
                       </select>
                     )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(member.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    {member.role !== 'SUPER_ADMIN' && (
-                      <button
-                        onClick={() => handleDelete(member.id, member.full_name || member.email)}
-                        disabled={deleteUserMutation.isPending}
-                        className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                      >
-                        <TrashIcon className="w-5 h-5" />
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                    <span className="text-xs text-gray-500">
+                      Joined {new Date(member.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </>
         ) : (
           <div className="text-center py-12">
             <UserCircleIcon className="mx-auto h-12 w-12 text-gray-400" />

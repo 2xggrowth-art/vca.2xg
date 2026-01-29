@@ -47,6 +47,9 @@ export const videographerProjectService = {
         industry_id: bchIndustry.id,
         profile_id: data.profileId,
         production_started_at: new Date().toISOString(),
+        // Required fields with defaults for videographer-initiated projects
+        target_emotion: 'Not specified',
+        expected_outcome: 'Not specified',
       })
       .select()
       .single();

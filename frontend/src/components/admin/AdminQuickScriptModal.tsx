@@ -16,6 +16,9 @@ import {
 } from '@heroicons/react/24/outline';
 import { contentConfigService } from '@/services/contentConfigService';
 import { assignmentService } from '@/services/assignmentService';
+import { CastCompositionGrid } from '@/components/forms';
+import type { CastComposition } from '@/types';
+import { DEFAULT_CAST_COMPOSITION } from '@/types';
 
 interface AdminQuickScriptModalProps {
   isOpen: boolean;
@@ -32,8 +35,7 @@ interface QuickScriptFormData {
   // Production details
   profileId: string;
   hookTagIds: string[];
-  characterTagIds: string[];
-  totalPeopleInvolved: number | undefined;
+  castComposition: CastComposition;
   shootPossibility: 25 | 50 | 75 | 100 | undefined;
   adminRemarks: string;
 }
@@ -92,8 +94,7 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
     expectedOutcome: '',
     profileId: '',
     hookTagIds: [],
-    characterTagIds: [],
-    totalPeopleInvolved: 1,
+    castComposition: { ...DEFAULT_CAST_COMPOSITION },
     shootPossibility: undefined,
     adminRemarks: '',
   });
@@ -102,10 +103,7 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
   const [newProfileName, setNewProfileName] = useState('');
   const [isAddingHookTag, setIsAddingHookTag] = useState(false);
   const [newHookTagName, setNewHookTagName] = useState('');
-  const [isAddingCharacterTag, setIsAddingCharacterTag] = useState(false);
-  const [newCharacterTagName, setNewCharacterTagName] = useState('');
   const [editingHookTag, setEditingHookTag] = useState<{ id: string; name: string } | null>(null);
-  const [editingCharacterTag, setEditingCharacterTag] = useState<{ id: string; name: string } | null>(null);
 
   // Fetch profiles
   const { data: profiles = [] } = useQuery({
@@ -118,13 +116,6 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
   const { data: hookTags = [] } = useQuery({
     queryKey: ['hook-tags'],
     queryFn: contentConfigService.getAllHookTags,
-    enabled: isOpen,
-  });
-
-  // Fetch character tags
-  const { data: characterTags = [] } = useQuery({
-    queryKey: ['character-tags'],
-    queryFn: contentConfigService.getAllCharacterTags,
     enabled: isOpen,
   });
 
@@ -191,45 +182,6 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
     },
   });
 
-  // Character tag mutations
-  const createCharacterTagMutation = useMutation({
-    mutationFn: (name: string) => contentConfigService.createCharacterTag({ name }),
-    onSuccess: (newTag) => {
-      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
-      setFormData(prev => ({ ...prev, characterTagIds: [...prev.characterTagIds, newTag.id] }));
-      setNewCharacterTagName('');
-      setIsAddingCharacterTag(false);
-      toast.success(`Character tag "${newTag.name}" created!`);
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to create character tag');
-    },
-  });
-
-  const updateCharacterTagMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => contentConfigService.updateCharacterTag(id, { name }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
-      setEditingCharacterTag(null);
-      toast.success('Character tag updated!');
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to update character tag');
-    },
-  });
-
-  const deleteCharacterTagMutation = useMutation({
-    mutationFn: (id: string) => contentConfigService.deleteCharacterTag(id),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['character-tags'] });
-      setFormData(prev => ({ ...prev, characterTagIds: prev.characterTagIds.filter(id => id !== deletedId) }));
-      toast.success('Character tag deleted!');
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to delete character tag');
-    },
-  });
-
   // Quick submit mutation
   const quickSubmitMutation = useMutation({
     mutationFn: async (data: QuickScriptFormData) => {
@@ -256,11 +208,24 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
           // Production details
           industry_id: bchIndustry.id,
           profile_id: data.profileId,
-          total_people_involved: data.totalPeopleInvolved,
+          total_people_involved: data.castComposition.total || 1,
           shoot_possibility: data.shootPossibility,
           admin_remarks: data.adminRemarks || null,
           production_stage: 'PLANNING',
           production_started_at: new Date().toISOString(),
+          // Cast composition (structured)
+          cast_composition: {
+            man: data.castComposition.man,
+            woman: data.castComposition.woman,
+            boy: data.castComposition.boy,
+            girl: data.castComposition.girl,
+            teen_boy: data.castComposition.teen_boy,
+            teen_girl: data.castComposition.teen_girl,
+            senior_man: data.castComposition.senior_man,
+            senior_woman: data.castComposition.senior_woman,
+            include_owner: data.castComposition.include_owner,
+            total: data.castComposition.total,
+          },
         })
         .select()
         .single();
@@ -292,19 +257,7 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
         }
       }
 
-      // Step 4: Link character tags (non-blocking - log errors but don't fail)
-      if (data.characterTagIds.length > 0) {
-        const charTagInserts = data.characterTagIds.map(tagId => ({
-          analysis_id: analysis.id,
-          character_tag_id: tagId,
-        }));
-        const { error: charTagError } = await supabase.from('analysis_character_tags').insert(charTagInserts);
-        if (charTagError) {
-          console.error('Character tag linking failed:', charTagError);
-        }
-      }
-
-      // Step 5: Save production metadata (non-blocking - log errors but don't fail)
+      // Step 4: Save production metadata (non-blocking - log errors but don't fail)
       // NOTE: Do NOT auto-assign videographer - scripts should go to Available Projects
       // queue so videographers can pick them. Only auto-assign editor/posting manager.
       try {
@@ -315,8 +268,7 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
           industryId: bchIndustry.id,
           profileId: data.profileId,
           hookTagIds: data.hookTagIds,
-          characterTagIds: data.characterTagIds,
-          totalPeopleInvolved: data.totalPeopleInvolved,
+          totalPeopleInvolved: data.castComposition.total || 1,
           shootPossibility: data.shootPossibility,
           adminRemarks: data.adminRemarks,
         });
@@ -350,8 +302,7 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
       expectedOutcome: '',
       profileId: '',
       hookTagIds: [],
-      characterTagIds: [],
-      totalPeopleInvolved: 1,
+      castComposition: { ...DEFAULT_CAST_COMPOSITION },
       shootPossibility: undefined,
       adminRemarks: '',
     });
@@ -359,8 +310,6 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
     setNewProfileName('');
     setIsAddingHookTag(false);
     setNewHookTagName('');
-    setIsAddingCharacterTag(false);
-    setNewCharacterTagName('');
   };
 
   const handleSubmit = () => {
@@ -372,7 +321,10 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
     if (!formData.expectedOutcome) errors.push('Expected Outcome');
     if (!formData.profileId) errors.push('Profile');
     if (formData.hookTagIds.length === 0) errors.push('Hook Tags');
-    if (formData.characterTagIds.length === 0) errors.push('Character Tags');
+    // Cast composition validation - need at least 1 person or include owner
+    if (formData.castComposition.total === 0 && !formData.castComposition.include_owner) {
+      errors.push('Cast Composition (add at least 1 person)');
+    }
     if (!formData.shootPossibility) errors.push('Shoot Possibility');
 
     if (errors.length > 0) {
@@ -397,16 +349,6 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
       hookTagIds: prev.hookTagIds.includes(tagId)
         ? prev.hookTagIds.filter(id => id !== tagId)
         : [...prev.hookTagIds, tagId]
-    }));
-  };
-
-  // Toggle character tag selection
-  const toggleCharacterTag = (tagId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      characterTagIds: prev.characterTagIds.includes(tagId)
-        ? prev.characterTagIds.filter(id => id !== tagId)
-        : [...prev.characterTagIds, tagId]
     }));
   };
 
@@ -739,162 +681,17 @@ export default function AdminQuickScriptModal({ isOpen, onClose }: AdminQuickScr
                 )}
               </div>
 
-              {/* Character Tags - Multi-Select Chips with Add/Edit/Delete */}
-              <div>
-                <label className="block text-base font-semibold text-gray-900 mb-3">
-                  Character Tags <span className="text-red-500">*</span>
-                  <span className="text-sm font-normal text-gray-500 ml-2">(select all that apply)</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {characterTags
-                    .filter((t: any) => t.is_active)
-                    .map((tag: any) => {
-                      const isSelected = formData.characterTagIds.includes(tag.id);
-                      const isEditing = editingCharacterTag?.id === tag.id;
-
-                      if (isEditing && editingCharacterTag) {
-                        return (
-                          <div key={tag.id} className="flex items-center gap-1 bg-orange-50 rounded-full px-2 py-1">
-                            <input
-                              type="text"
-                              value={editingCharacterTag.name}
-                              onChange={(e) => setEditingCharacterTag({ id: editingCharacterTag.id, name: e.target.value })}
-                              className="px-2 py-1 text-sm border border-orange-300 rounded-lg w-24 focus:ring-1 focus:ring-orange-500"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && editingCharacterTag.name.trim()) {
-                                  e.preventDefault();
-                                  updateCharacterTagMutation.mutate({ id: editingCharacterTag.id, name: editingCharacterTag.name.trim() });
-                                } else if (e.key === 'Escape') {
-                                  setEditingCharacterTag(null);
-                                }
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => updateCharacterTagMutation.mutate({ id: editingCharacterTag.id, name: editingCharacterTag.name.trim() })}
-                              disabled={!editingCharacterTag.name.trim() || updateCharacterTagMutation.isPending}
-                              className="p-1 text-orange-600 hover:text-orange-800 disabled:opacity-50"
-                            >
-                              <CheckIcon className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingCharacterTag(null)}
-                              className="p-1 text-gray-500 hover:text-gray-700"
-                            >
-                              <XMarkIcon className="w-4 h-4" />
-                            </button>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div key={tag.id} className="group relative">
-                          <button
-                            type="button"
-                            onClick={() => toggleCharacterTag(tag.id)}
-                            className={`px-4 py-2.5 min-h-[44px] rounded-full font-medium transition-all text-sm ${
-                              isSelected
-                                ? 'bg-orange-500 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            {tag.name}
-                          </button>
-                          {/* Edit/Delete buttons on hover */}
-                          <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setEditingCharacterTag({ id: tag.id, name: tag.name }); }}
-                              className="p-1 bg-white rounded-full shadow-md text-gray-500 hover:text-orange-600 border border-gray-200"
-                            >
-                              <PencilIcon className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${tag.name}"?`)) deleteCharacterTagMutation.mutate(tag.id); }}
-                              className="p-1 bg-white rounded-full shadow-md text-gray-500 hover:text-red-600 border border-gray-200"
-                            >
-                              <TrashIcon className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  {/* Add new character tag button */}
-                  {!isAddingCharacterTag && (
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingCharacterTag(true)}
-                      className="px-4 py-2.5 min-h-[44px] rounded-full font-medium bg-gray-50 text-gray-600 hover:bg-gray-100 border-2 border-dashed border-gray-300 text-sm"
-                    >
-                      <PlusIcon className="w-4 h-4 inline mr-1" />
-                      Add Tag
-                    </button>
-                  )}
-                </div>
-                {isAddingCharacterTag && (
-                  <div className="flex gap-2 mt-3 items-center bg-orange-50 p-3 rounded-xl">
-                    <input
-                      type="text"
-                      value={newCharacterTagName}
-                      onChange={(e) => setNewCharacterTagName(e.target.value)}
-                      placeholder="New character tag name..."
-                      className="flex-1 px-4 py-2.5 text-sm border-2 border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newCharacterTagName.trim()) {
-                          e.preventDefault();
-                          createCharacterTagMutation.mutate(newCharacterTagName.trim());
-                        } else if (e.key === 'Escape') {
-                          setIsAddingCharacterTag(false);
-                          setNewCharacterTagName('');
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => createCharacterTagMutation.mutate(newCharacterTagName.trim())}
-                      disabled={!newCharacterTagName.trim() || createCharacterTagMutation.isPending}
-                      className="px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setIsAddingCharacterTag(false); setNewCharacterTagName(''); }}
-                      className="px-3 py-2.5 text-gray-500 hover:text-gray-700"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* People Involved */}
-              <div>
-                <label className="block text-base font-semibold text-gray-900 mb-2">
-                  People Involved
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="Enter number"
-                  value={formData.totalPeopleInvolved ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '');
-                    if (val === '') {
-                      setFormData(prev => ({ ...prev, totalPeopleInvolved: undefined }));
-                    } else {
-                      const num = parseInt(val);
-                      setFormData(prev => ({ ...prev, totalPeopleInvolved: Math.min(Math.max(num, 1), 50) }));
-                    }
-                  }}
-                  className="w-full px-4 py-3.5 min-h-[52px] border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition text-base"
-                />
-              </div>
+              {/* Cast Composition */}
+              <CastCompositionGrid
+                label="Cast Composition"
+                hint="Select who will appear in the video"
+                value={formData.castComposition}
+                onChange={(cast) => setFormData(prev => ({ ...prev, castComposition: cast }))}
+                showPresets
+                showOwnerToggle
+                showSummary
+                columns={2}
+              />
 
               {/* Shoot Possibility - Chip Selection */}
               <div>

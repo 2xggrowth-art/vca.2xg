@@ -1,28 +1,26 @@
 /**
- * Admin Dashboard - Notion-Inspired Mobile-Responsive Layout
- *
- * Mobile-first design with:
- * - Hamburger menu on mobile
- * - Fixed sidebar on desktop (224px / Notion width)
- * - Touch-friendly button sizes (44px minimum)
- * - Backdrop overlay on mobile
- * - Smooth transitions
+ * Admin Dashboard - Mobile-First with Bottom Navigation
  */
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import NeedApprovalPage from './admin/NeedApprovalPage';
 import TeamMembersPage from './admin/TeamMembersPage';
 import ProductionStatusPage from './admin/ProductionStatusPage';
+import BottomNavigation from '@/components/BottomNavigation';
+import { UserRole } from '@/types';
+
+type AdminTab = 'team' | 'approval' | 'production';
 
 export default function AdminDashboard() {
-  const [selectedPage, setSelectedPage] = useState<'team' | 'approval' | 'production'>('approval');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = (searchParams.get('tab') as AdminTab) || 'approval';
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Close sidebar when route changes on mobile
   useEffect(() => {
     const handleResize = () => {
-      // Auto-close sidebar on desktop
       if (window.innerWidth >= 768) {
         setSidebarOpen(false);
       }
@@ -32,9 +30,8 @@ export default function AdminDashboard() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handlePageChange = (page: 'team' | 'approval' | 'production') => {
-    setSelectedPage(page);
-    // Close sidebar on mobile after selection
+  const handlePageChange = (page: AdminTab) => {
+    setSearchParams({ tab: page });
     if (window.innerWidth < 768) {
       setSidebarOpen(false);
     }
@@ -53,7 +50,7 @@ export default function AdminDashboard() {
 
       {/* Sidebar Navigation */}
       <AdminSidebar
-        selectedPage={selectedPage}
+        selectedPage={currentTab}
         onPageChange={handlePageChange}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -61,11 +58,14 @@ export default function AdminDashboard() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden pt-[56px] md:pt-0">
-        {selectedPage === 'team' && <TeamMembersPage />}
-        {selectedPage === 'approval' && <NeedApprovalPage />}
-        {selectedPage === 'production' && <ProductionStatusPage />}
+      <div className="flex-1 flex flex-col overflow-hidden pt-[56px] md:pt-0 pb-20 md:pb-0">
+        {currentTab === 'team' && <TeamMembersPage />}
+        {currentTab === 'approval' && <NeedApprovalPage />}
+        {currentTab === 'production' && <ProductionStatusPage />}
       </div>
+
+      {/* Bottom Navigation (Mobile) */}
+      <BottomNavigation role={UserRole.SUPER_ADMIN} />
     </div>
   );
 }
