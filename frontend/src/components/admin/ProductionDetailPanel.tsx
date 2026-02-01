@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { assignmentService } from '@/services/assignmentService';
 import { contentConfigService } from '@/services/contentConfigService';
+import { getDriveDownloadUrl } from '@/services/googleDriveOAuthService';
 import { supabase } from '@/lib/supabase';
 import { ProductionStage } from '@/types';
 import type { ViralAnalysis, AssignTeamData } from '@/types';
@@ -1293,7 +1294,7 @@ export default function ProductionDetailPanel({
                         <EyeIcon className="w-4 h-4" />
                       </a>
                       <a
-                        href={file.file_url}
+                        href={getDriveDownloadUrl(file.file_id || file.file_url)}
                         download={file.file_name}
                         className="p-1.5 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition"
                         title="Download file"

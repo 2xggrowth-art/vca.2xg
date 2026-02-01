@@ -7,7 +7,7 @@ import { FilmIcon, CheckCircleIcon, PlayCircleIcon, CloudArrowUpIcon, TrashIcon,
 import { useState, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
-import { googleDriveOAuthService } from '@/services/googleDriveOAuthService';
+import { googleDriveOAuthService, getDriveDownloadUrl } from '@/services/googleDriveOAuthService';
 import type { ViralAnalysis, UpdateProductionStageData, ProductionFile, CastComposition } from '@/types';
 import { UserRole, ProductionStageV2 } from '@/types';
 
@@ -931,7 +931,7 @@ export default function EditorDashboard() {
                               </div>
                             </div>
                             <a
-                              href={file.file_url}
+                              href={getDriveDownloadUrl(file.file_id || file.file_url)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium ml-2"

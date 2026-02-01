@@ -792,7 +792,8 @@ class GoogleDriveOAuthService {
    * Download a file from Google Drive as a Blob using the Drive API.
    * Includes retry with exponential backoff for reliability.
    */
-  async downloadFileAsBlob(fileId: string): Promise<Blob> {
+  async downloadFileAsBlob(fileIdOrUrl: string): Promise<Blob> {
+    const fileId = extractDriveFileId(fileIdOrUrl);
     await this.ensureSignedIn();
     return this.retryWithBackoff(async () => {
       const response = await fetch(
@@ -813,3 +814,27 @@ class GoogleDriveOAuthService {
 
 // Export singleton instance
 export const googleDriveOAuthService = new GoogleDriveOAuthService();
+
+/**
+ * Extract a plain Google Drive file ID from a URL or return as-is if already an ID.
+ */
+export function extractDriveFileId(fileIdOrUrl: string): string {
+  if (!fileIdOrUrl) return fileIdOrUrl;
+  // Already a plain ID (no slashes or query params)
+  if (!fileIdOrUrl.includes('/') && !fileIdOrUrl.includes('?')) return fileIdOrUrl;
+  // Match /file/d/FILE_ID/ pattern
+  const fileMatch = fileIdOrUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileMatch) return fileMatch[1];
+  // Match ?id=FILE_ID pattern
+  const idMatch = fileIdOrUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch) return idMatch[1];
+  return fileIdOrUrl;
+}
+
+/**
+ * Get a direct download URL for a Google Drive file.
+ */
+export function getDriveDownloadUrl(fileIdOrUrl: string): string {
+  const fileId = extractDriveFileId(fileIdOrUrl);
+  return `https://drive.google.com/uc?id=${fileId}&export=download`;
+}

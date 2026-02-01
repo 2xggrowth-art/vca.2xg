@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { assignmentService } from '@/services/assignmentService';
+import { getDriveDownloadUrl } from '@/services/googleDriveOAuthService';
 import { productionFilesService } from '@/services/productionFilesService';
 import { postingManagerService } from '@/services/postingManagerService';
 import {
@@ -768,7 +769,7 @@ export default function PostingManagerDashboard() {
                             </div>
                           </div>
                           <a
-                            href={file.file_url}
+                            href={getDriveDownloadUrl(file.file_id || file.file_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200"
