@@ -13,9 +13,30 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// Middleware
+// Middleware - Allow multiple origins for development
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://192.168.68.125:5173',
+  'http://192.168.68.125:5174',
+  'http://192.168.68.125:5175',
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    // For development, allow any localhost/192.168.x.x origin
+    if (origin.match(/^http:\/\/(localhost|192\.168\.\d+\.\d+)(:\d+)?$/)) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -160,6 +181,85 @@ app.delete('/api/admin/users/:userId', verifyAdmin, async (req, res) => {
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
     console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Reset user password endpoint (Admin only)
+app.post('/api/admin/users/:userId/reset-password', verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { temporaryPassword } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    if (!temporaryPassword) {
+      return res.status(400).json({ error: 'Temporary password is required' });
+    }
+
+    if (temporaryPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    // Get user's email from database
+    const userResult = await pool.query(
+      'SELECT email FROM profiles WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const email = userResult.rows[0].email;
+
+    // Find Authentik user by email
+    const usersRes = await fetch(
+      `${AUTHENTIK_URL}/api/v3/core/users/?username=${encodeURIComponent(email)}`,
+      {
+        headers: { 'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}` },
+      }
+    );
+
+    if (!usersRes.ok) {
+      return res.status(500).json({ error: 'Failed to lookup user in authentication system' });
+    }
+
+    const usersData = await usersRes.json();
+    const authentikUser = usersData.results?.[0];
+
+    if (!authentikUser) {
+      return res.status(404).json({ error: 'User not found in authentication system' });
+    }
+
+    // Set the new password in Authentik
+    const setPassRes = await fetch(
+      `${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/set_password/`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}`,
+        },
+        body: JSON.stringify({ password: temporaryPassword }),
+      }
+    );
+
+    if (!setPassRes.ok) {
+      const errText = await setPassRes.text().catch(() => '');
+      console.error('Set password failed:', errText);
+      return res.status(500).json({ error: 'Failed to reset password' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      user: { id: userId, email },
+    });
+  } catch (error) {
+    console.error('Admin reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

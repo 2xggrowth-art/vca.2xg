@@ -38,3 +38,6 @@ Thumbs.db
 
 # Local development
 *.local
+
+# GitHub token
+.github-token

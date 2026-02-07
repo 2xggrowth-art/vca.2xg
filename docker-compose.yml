@@ -36,6 +36,8 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_SERVER_PORT: 3000
+    ports:
+      - "3001:3000"
     depends_on:
       vca-postgres:
         condition: service_healthy
@@ -65,12 +67,15 @@ services:
     container_name: vca-backend
     environment:
       PORT: 3001
-      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@vca-postgres:5432/viral_content_analyzer
-      FRONTEND_URL: https://vca.2xg.in
-      AUTHENTIK_URL: https://vca-auth.2xg.in
-      AUTHENTIK_INTERNAL_URL: http://vca-authentik-server:9000
-      AUTHENTIK_JWKS_URI: http://vca-authentik-server:9000/application/o/viral-content-analyzer/.well-known/jwks.json
-      AUTHENTIK_ISSUER: https://vca-auth.2xg.in/application/o/viral-content-analyzer/
+      # Use Supabase for profile/user data (commented out local postgres)
+      # DATABASE_URL: postgres://postgres:${DB_PASSWORD}@vca-postgres:5432/viral_content_analyzer
+      SUPABASE_URL: https://ckfbjsphyasborpnwbyy.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrZmJqc3BoeWFzYm9ycG53Ynl5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Nzc3MjgzMCwiZXhwIjoyMDgzMzQ4ODMwfQ.sM87Al3CXlv-W-sMZonNnmN52saxIYTp0HRzusA2ylw
+      FRONTEND_URL: ${FRONTEND_URL}
+      AUTHENTIK_URL: ${AUTHENTIK_URL}
+      AUTHENTIK_INTERNAL_URL: ${AUTHENTIK_URL}
+      AUTHENTIK_JWKS_URI: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/.well-known/jwks.json
+      AUTHENTIK_ISSUER: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
       AUTHENTIK_API_TOKEN: ${AUTHENTIK_API_TOKEN}
@@ -80,6 +85,13 @@ services:
       GOOGLE_DRIVE_FINAL_VIDEO_FOLDER_ID: ${GOOGLE_DRIVE_FINAL_VIDEO_FOLDER_ID}
       JWT_SECRET: ${JWT_SECRET}
       VOICE_NOTES_DIR: /data/voice-notes
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+    ports:
+      - "3000:3001"
     volumes:
       - vca-voice-notes:/data/voice-notes
     depends_on:

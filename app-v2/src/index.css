@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== BASE STYLES ===== */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-800 antialiased;
+  min-height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  overflow-x: hidden;
+}
+
+/* ===== MOBILE APP CONTAINER ===== */
+.app-container {
+  @apply flex flex-col bg-white;
+  min-height: 100dvh;
+}
+
+/* ===== CUSTOM SCROLLBAR (HIDE) ===== */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ===== SAFE AREA PADDING ===== */
+.pb-safe {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
+/* ===== GRADIENT BACKGROUNDS ===== */
+.bg-gradient-primary {
+  @apply bg-gradient-to-br from-primary to-primary-dark;
+}
+
+.bg-gradient-success {
+  @apply bg-gradient-to-br from-success to-success-dark;
+}
+
+.bg-gradient-warning {
+  @apply bg-gradient-to-br from-warning to-warning-dark;
+}
+
+.bg-gradient-danger {
+  @apply bg-gradient-to-br from-danger to-danger-dark;
+}
+
+.bg-gradient-admin {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+}
+
+.bg-gradient-writer {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+}
+
+.bg-gradient-videographer {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+}
+
+.bg-gradient-editor {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.bg-gradient-posting {
+  background: linear-gradient(135deg, #06b6d4, #0891b2);
+}
+
+/* ===== BUTTON ACTIVE STATES ===== */
+.btn-press:active {
+  transform: scale(0.98);
+}
+
+/* ===== CARD PRESS EFFECT ===== */
+.card-press:active {
+  transform: scale(0.99);
+  @apply shadow-md;
+}
+
+/* ===== ANIMATION DELAYS ===== */
+.delay-1 { animation-delay: 0.1s; animation-fill-mode: both; }
+.delay-2 { animation-delay: 0.2s; animation-fill-mode: both; }
+.delay-3 { animation-delay: 0.3s; animation-fill-mode: both; }
+.delay-4 { animation-delay: 0.4s; animation-fill-mode: both; }
+
+/* ===== INPUT FOCUS STYLES ===== */
+input:focus, textarea:focus, select:focus {
+  @apply outline-none ring-2 ring-primary ring-opacity-50;
+}
+
+/* ===== SELECTION ITEM STYLES ===== */
+.selection-item {
+  @apply flex flex-col items-center justify-center gap-1 p-4 bg-white border-2 border-gray-200 rounded-md cursor-pointer transition-all;
+}
+
+.selection-item:active,
+.selection-item.selected {
+  @apply border-primary bg-primary/5;
+}
+
+.selection-item.selected {
+  @apply border-[3px];
+}
+
+/* ===== FILTER TAB STYLES ===== */
+.filter-tab {
+  @apply flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap bg-gray-100 text-gray-600 border-none cursor-pointer transition-all;
+}
+
+.filter-tab.active {
+  @apply bg-primary text-white;
+}
+
+.filter-tab .count {
+  @apply w-5 h-5 rounded-full bg-black/10 text-xs flex items-center justify-center;
+}
+
+.filter-tab.active .count {
+  @apply bg-white/20;
+}
+
+/* ===== PULL TO REFRESH INDICATOR ===== */
+.pull-indicator {
+  @apply absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full py-4;
+}
