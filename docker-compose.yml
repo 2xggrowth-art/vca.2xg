@@ -70,7 +70,7 @@ services:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@vca-postgres:5432/viral_content_analyzer
       FRONTEND_URL: ${FRONTEND_URL}
       AUTHENTIK_URL: ${AUTHENTIK_URL}
-      AUTHENTIK_INTERNAL_URL: ${AUTHENTIK_URL}
+      AUTHENTIK_INTERNAL_URL: http://vca-authentik-server:9000
       AUTHENTIK_JWKS_URI: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/.well-known/jwks.json
       AUTHENTIK_ISSUER: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
