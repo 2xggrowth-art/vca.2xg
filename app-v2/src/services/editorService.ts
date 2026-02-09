@@ -48,8 +48,7 @@ export const editorService = {
         assignments:project_assignments(
           id, role,
           user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
+        )
       `)
       .eq('status', 'APPROVED')
       .eq('production_stage', 'READY_FOR_EDIT')
@@ -58,27 +57,55 @@ export const editorService = {
 
     if (error) throw error;
 
-    // Filter: Only projects without an editor AND with raw footage
     const projects = (data || []) as any[];
+    if (projects.length === 0) return [];
+
+    // Fetch production files separately (PostgREST embedded query doesn't work)
+    const projectIds = projects.map((p: any) => p.id);
+    const { data: allFiles } = await supabase
+      .from('production_files')
+      .select('*')
+      .in('analysis_id', projectIds);
+
+    const filesByAnalysis = new Map<string, any[]>();
+    for (const file of (allFiles || []) as any[]) {
+      const existing = filesByAnalysis.get(file.analysis_id) || [];
+      existing.push(file);
+      filesByAnalysis.set(file.analysis_id, existing);
+    }
+
+    // Attach files to projects
+    for (const project of projects) {
+      project.production_files = filesByAnalysis.get(project.id) || [];
+    }
+
+    // Filter: Only projects without an editor AND with raw footage
     const availableProjects = projects.filter((project: any) => {
-      // Check if already has editor
       const hasEditor = project.assignments?.some(
         (a: any) => a.role === 'EDITOR'
       );
       if (hasEditor) return false;
 
-      // Check if has raw footage files
       const hasRawFiles = project.production_files?.some(
         (f: any) => RAW_FILE_TYPES.includes(f.file_type) && !f.is_deleted
       );
       return hasRawFiles;
     });
 
-    // Get rejected projects from localStorage
-    const rejectedIds = this.getRejectedProjectIds();
+    // Get skipped projects from database
+    const { data: { user } } = await auth.getUser();
+    let skippedIds = new Set<string>();
+    if (user) {
+      const { data: skips } = await supabase
+        .from('project_skips')
+        .select('analysis_id')
+        .eq('user_id', user.id)
+        .eq('role', 'EDITOR');
+      skippedIds = new Set(Array.isArray(skips) ? skips.map((s: any) => s.analysis_id) : []);
+    }
 
     return availableProjects
-      .filter((p: any) => !rejectedIds.includes(p.id))
+      .filter((p: any) => !skippedIds.has(p.id))
       .map((project: any) => ({
         ...project,
         email: project.profiles?.email,
@@ -108,27 +135,39 @@ export const editorService = {
 
     const analysisIds = assignmentsList.map((a) => a.analysis_id);
 
-    // Fetch the full projects
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        industry:industries(id, name, short_code),
-        profile:profile_list(id, name),
-        profiles:user_id(email, full_name, avatar_url),
-        assignments:project_assignments(
-          id, role,
-          user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
-      `)
-      .in('id', analysisIds)
-      .order('priority', { ascending: false })
-      .order('created_at', { ascending: false });
+    // Fetch projects and production files in parallel
+    const [projectsResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          industry:industries(id, name, short_code),
+          profile:profile_list(id, name),
+          profiles:user_id(email, full_name, avatar_url),
+          assignments:project_assignments(
+            id, role,
+            user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
+          )
+        `)
+        .in('id', analysisIds)
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('production_files')
+        .select('*')
+        .in('analysis_id', analysisIds),
+    ]);
 
-    if (error) throw error;
+    if (projectsResult.error) throw projectsResult.error;
 
-    const projectList = (data || []) as any[];
+    const filesByAnalysis = new Map<string, any[]>();
+    for (const file of (filesResult.data || []) as any[]) {
+      const existing = filesByAnalysis.get(file.analysis_id) || [];
+      existing.push(file);
+      filesByAnalysis.set(file.analysis_id, existing);
+    }
+
+    const projectList = (projectsResult.data || []) as any[];
     return projectList.map((project: any) => ({
       ...project,
       email: project.profiles?.email,
@@ -137,6 +176,7 @@ export const editorService = {
       videographer: project.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: project.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
       posting_manager: project.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+      production_files: filesByAnalysis.get(project.id) || [],
     })) as ViralAnalysis[];
   },
 
@@ -147,50 +187,64 @@ export const editorService = {
     const { data: { user } } = await auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
-    // Get available projects count
-    const availableProjects = await this.getAvailableProjects();
-    const available = availableProjects.length;
+    // Get my assignment IDs first (lightweight)
+    const { data: assignments, error: assignError } = await supabase
+      .from('project_assignments')
+      .select('analysis_id')
+      .eq('user_id', user.id)
+      .eq('role', 'EDITOR');
 
-    // Get my projects
-    const myProjects = await this.getMyProjects();
+    if (assignError) throw assignError;
+    const assignmentsList = (assignments || []) as { analysis_id: string }[];
+    const myIds = assignmentsList.map((a) => a.analysis_id);
 
-    // In progress = EDITING stage
-    const inProgress = myProjects.filter(
-      (p) => p.production_stage === 'EDITING'
-    ).length;
+    // Run count queries in parallel
+    const [availableProjects, inProgressResult, completedResult] = await Promise.all([
+      this.getAvailableProjects(),
+      myIds.length > 0
+        ? supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).in('id', myIds).eq('production_stage', 'EDITING')
+        : Promise.resolve({ count: 0 }),
+      myIds.length > 0
+        ? supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).in('id', myIds).in('production_stage', ['READY_TO_POST', 'POSTED'])
+        : Promise.resolve({ count: 0 }),
+    ]);
 
-    // Completed = READY_TO_POST or POSTED stages
-    const completedStages = ['READY_TO_POST', 'POSTED'];
-    const completed = myProjects.filter(
-      (p) => completedStages.includes(p.production_stage || '')
-    ).length;
-
-    return { inProgress, available, completed };
+    return {
+      inProgress: inProgressResult.count || 0,
+      available: availableProjects.length,
+      completed: completedResult.count || 0,
+    };
   },
 
   /**
    * Get a single project by ID with full details
    */
   async getProjectById(analysisId: string): Promise<ViralAnalysis> {
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        industry:industries(id, name, short_code),
-        profile:profile_list(id, name),
-        profiles:user_id(email, full_name, avatar_url),
-        assignments:project_assignments(
-          id, role,
-          user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
-      `)
-      .eq('id', analysisId)
-      .single();
+    const [projectResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          industry:industries(id, name, short_code),
+          profile:profile_list(id, name),
+          profiles:user_id(email, full_name, avatar_url),
+          assignments:project_assignments(
+            id, role,
+            user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
+          )
+        `)
+        .eq('id', analysisId)
+        .single(),
+      supabase
+        .from('production_files')
+        .select('*')
+        .eq('analysis_id', analysisId)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) throw error;
+    if (projectResult.error) throw projectResult.error;
 
-    const analysis = data as any;
+    const analysis = projectResult.data as any;
     return {
       ...analysis,
       email: analysis.profiles?.email,
@@ -199,6 +253,7 @@ export const editorService = {
       videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
       posting_manager: analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+      production_files: (filesResult.data || []) as any[],
     } as ViralAnalysis;
   },
 
@@ -260,7 +315,7 @@ export const editorService = {
 
     if (updateError) throw updateError;
 
-    // Assign editor to the project
+    // Assign editor to the project — rollback stage on failure
     const { error: assignmentError } = await supabase
       .from('project_assignments')
       .insert({
@@ -270,7 +325,13 @@ export const editorService = {
         assigned_by: user.id,
       });
 
-    if (assignmentError) throw assignmentError;
+    if (assignmentError) {
+      // Rollback: revert production_stage back to READY_FOR_EDIT
+      await supabase.from('viral_analyses')
+        .update({ production_stage: 'READY_FOR_EDIT' })
+        .eq('id', data.analysisId);
+      throw assignmentError;
+    }
 
     return this.getProjectById(data.analysisId);
   },
@@ -358,27 +419,29 @@ export const editorService = {
   },
 
   /**
-   * Reject a project - hides it from available list (stored in localStorage)
+   * Skip a project - persisted to database so it syncs across devices
    */
-  getRejectedProjectIds(): string[] {
-    try {
-      const raw = localStorage.getItem('editor_rejected_projects');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+  async rejectProject(analysisId: string): Promise<void> {
+    const { data: { user } } = await auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from('project_skips')
+      .upsert({
+        analysis_id: analysisId,
+        user_id: user.id,
+        role: 'EDITOR',
+      }, { onConflict: 'analysis_id,user_id' });
   },
 
-  rejectProject(analysisId: string): void {
-    const rejected = this.getRejectedProjectIds();
-    if (!rejected.includes(analysisId)) {
-      rejected.push(analysisId);
-      localStorage.setItem('editor_rejected_projects', JSON.stringify(rejected));
-    }
-  },
+  async unrejectProject(analysisId: string): Promise<void> {
+    const { data: { user } } = await auth.getUser();
+    if (!user) return;
 
-  unrejectProject(analysisId: string): void {
-    const rejected = this.getRejectedProjectIds().filter(id => id !== analysisId);
-    localStorage.setItem('editor_rejected_projects', JSON.stringify(rejected));
+    await supabase
+      .from('project_skips')
+      .delete()
+      .eq('analysis_id', analysisId)
+      .eq('user_id', user.id);
   },
 };

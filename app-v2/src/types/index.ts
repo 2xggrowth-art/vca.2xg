@@ -2,7 +2,7 @@
 // USER ROLES
 // ============================================
 
-export type UserRole = 'admin' | 'script_writer' | 'videographer' | 'editor' | 'posting_manager';
+export type UserRole = 'admin' | 'super_admin' | 'script_writer' | 'videographer' | 'editor' | 'posting_manager';
 
 export interface User {
   id: string;
@@ -192,7 +192,6 @@ export interface ViralAnalysis {
   creator_name?: string;
   unusual_element?: string;
   works_without_audio?: string;
-  hook_types?: string[];
   content_rating?: number;
   replication_strength?: number;
 
@@ -296,6 +295,9 @@ export interface ViralAnalysis {
   editor?: UserProfile;
   posting_manager?: UserProfile;
 
+  // Skips
+  skips?: ProjectSkip[];
+
   // User info (from joins)
   email?: string;
   full_name?: string;
@@ -303,6 +305,8 @@ export interface ViralAnalysis {
 
   // Files
   production_files?: ProductionFile[];
+  files_count?: number;
+  video_duration?: number;
 
   // Timestamps
   created_at: string;
@@ -321,6 +325,15 @@ export interface ProjectAssignment {
   assigned_by: string;
   assigned_at: string;
   created_at: string;
+  user?: UserProfile;
+}
+
+export interface ProjectSkip {
+  id: string;
+  analysis_id: string;
+  user_id: string;
+  role: 'VIDEOGRAPHER' | 'EDITOR';
+  skipped_at: string;
   user?: UserProfile;
 }
 
@@ -362,6 +375,7 @@ export interface ProductionFile {
   is_deleted: boolean;
   mime_type?: string;
   description?: string;
+  thumbnail_url?: string;
   created_at: string;
   uploader?: UserProfile;
 }
@@ -376,7 +390,6 @@ export interface AnalysisFormData {
   title: string;
   shootType: string;
   creatorName: string;
-  hookTypes: string[];
   worksWithoutAudio: string;
   profileId?: string;
 

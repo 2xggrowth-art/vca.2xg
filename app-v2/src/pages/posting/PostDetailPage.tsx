@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 import { postingManagerService } from '@/services/postingManagerService';
-import type { ViralAnalysis, ProductionFile } from '@/types';
+import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
 const PLATFORMS = [
@@ -233,7 +233,6 @@ export default function PostDetailPage() {
     );
   }
 
-  const platformDisplay = getPlatformDisplay(project.platform);
   const editedFiles = getEditedFiles();
   const videoThumbnail = getVideoThumbnail();
   const isReadyToPost = project.production_stage === 'READY_TO_POST';

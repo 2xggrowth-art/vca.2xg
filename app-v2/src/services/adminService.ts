@@ -272,32 +272,23 @@ export const adminService = {
    * Get dashboard stats
    */
   async getDashboardStats(): Promise<DashboardStats> {
-    const [analysesResult, usersResult] = await Promise.all([
-      supabase.from('viral_analyses').select('status', { count: 'exact' }),
-      supabase.from('profiles').select('role', { count: 'exact' }),
+    // Use server-side count queries instead of fetching all records
+    const [totalResult, usersResult, pendingResult, approvedResult, rejectedResult] = await Promise.all([
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }),
+      supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('status', 'APPROVED'),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('status', 'REJECTED'),
     ]);
 
-    if (analysesResult.error) throw analysesResult.error;
-    if (usersResult.error) throw usersResult.error;
-
-    const totalAnalyses = analysesResult.count || 0;
-    const totalUsers = usersResult.count || 0;
-
-    const { data: statusCounts } = await supabase
-      .from('viral_analyses')
-      .select('status');
-
-    const statusData = (statusCounts || []) as { status: string }[];
-    const pending = statusData.filter((a) => a.status === 'PENDING').length;
-    const approved = statusData.filter((a) => a.status === 'APPROVED').length;
-    const rejected = statusData.filter((a) => a.status === 'REJECTED').length;
+    if (totalResult.error) throw totalResult.error;
 
     return {
-      totalAnalyses,
-      totalUsers,
-      pendingAnalyses: pending,
-      approvedAnalyses: approved,
-      rejectedAnalyses: rejected,
+      totalAnalyses: totalResult.count || 0,
+      totalUsers: usersResult.count || 0,
+      pendingAnalyses: pendingResult.count || 0,
+      approvedAnalyses: approvedResult.count || 0,
+      rejectedAnalyses: rejectedResult.count || 0,
     };
   },
 
@@ -305,37 +296,39 @@ export const adminService = {
    * Get queue stats for pipeline overview
    */
   async getQueueStats(): Promise<QueueStats> {
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select('status, production_stage');
+    // Use server-side count queries per stage instead of fetching all records
+    const approvedBase = () => supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('status', 'APPROVED');
 
-    if (error) throw error;
+    const [
+      pendingResult,
+      planningResult,
+      nullStageResult,
+      shootingResult,
+      readyForEditResult,
+      editingResult,
+      readyToPostResult,
+      postedResult,
+    ] = await Promise.all([
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+      approvedBase().in('production_stage', ['PLANNING', 'NOT_STARTED', 'PRE_PRODUCTION', 'PLANNED']),
+      approvedBase().is('production_stage', null),
+      approvedBase().eq('production_stage', 'SHOOTING'),
+      approvedBase().in('production_stage', ['READY_FOR_EDIT', 'SHOOT_REVIEW']),
+      approvedBase().eq('production_stage', 'EDITING'),
+      approvedBase().in('production_stage', ['READY_TO_POST', 'EDIT_REVIEW', 'FINAL_REVIEW']),
+      approvedBase().eq('production_stage', 'POSTED'),
+    ]);
 
-    const analyses = (data || []) as { status: string; production_stage?: string }[];
-
-    const pending = analyses.filter((a) => a.status === 'PENDING').length;
-    const approved = analyses.filter((a) => a.status === 'APPROVED');
-
-    const planningStages = ['PLANNING', 'NOT_STARTED', 'PRE_PRODUCTION', 'PLANNED'];
-    const planning = approved.filter((a) => planningStages.includes(a.production_stage || '') || !a.production_stage).length;
-    const shooting = approved.filter((a) => a.production_stage === 'SHOOTING').length;
-    const readyForEdit = approved.filter((a) => ['READY_FOR_EDIT', 'SHOOT_REVIEW'].includes(a.production_stage || '')).length;
-    const editing = approved.filter((a) => a.production_stage === 'EDITING').length;
-    const readyToPost = approved.filter((a) => ['READY_TO_POST', 'EDIT_REVIEW', 'FINAL_REVIEW'].includes(a.production_stage || '')).length;
-    const posted = approved.filter((a) => a.production_stage === 'POSTED').length;
-
+    const pending = pendingResult.count || 0;
+    const planning = (planningResult.count || 0) + (nullStageResult.count || 0);
+    const shooting = shootingResult.count || 0;
+    const readyForEdit = readyForEditResult.count || 0;
+    const editing = editingResult.count || 0;
+    const readyToPost = readyToPostResult.count || 0;
+    const posted = postedResult.count || 0;
     const totalActive = planning + shooting + readyForEdit + editing + readyToPost;
 
-    return {
-      pending,
-      planning,
-      shooting,
-      readyForEdit,
-      editing,
-      readyToPost,
-      posted,
-      totalActive,
-    };
+    return { pending, planning, shooting, readyForEdit, editing, readyToPost, posted, totalActive };
   },
 
   /**
@@ -379,20 +372,26 @@ export const adminService = {
     postingManagers: number;
     total: number;
   }> {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('role');
+    // Use server-side count queries per role instead of fetching all profiles
+    const countByRole = (roles: string[]) =>
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).in('role', roles);
 
-    if (error) throw error;
+    const [totalResult, adminsResult, writersResult, videographersResult, editorsResult, pmResult] = await Promise.all([
+      supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      countByRole(['SUPER_ADMIN', 'admin']),
+      countByRole(['SCRIPT_WRITER', 'script_writer']),
+      countByRole(['VIDEOGRAPHER', 'videographer']),
+      countByRole(['EDITOR', 'editor']),
+      countByRole(['POSTING_MANAGER', 'posting_manager']),
+    ]);
 
-    const users = (data || []) as { role: string }[];
     return {
-      admins: users.filter((u) => u.role === 'SUPER_ADMIN' || u.role === 'admin').length,
-      writers: users.filter((u) => u.role === 'SCRIPT_WRITER' || u.role === 'script_writer').length,
-      videographers: users.filter((u) => u.role === 'VIDEOGRAPHER' || u.role === 'videographer').length,
-      editors: users.filter((u) => u.role === 'EDITOR' || u.role === 'editor').length,
-      postingManagers: users.filter((u) => u.role === 'POSTING_MANAGER' || u.role === 'posting_manager').length,
-      total: users.length,
+      admins: adminsResult.count || 0,
+      writers: writersResult.count || 0,
+      videographers: videographersResult.count || 0,
+      editors: editorsResult.count || 0,
+      postingManagers: pmResult.count || 0,
+      total: totalResult.count || 0,
     };
   },
 
@@ -415,37 +414,40 @@ export const adminService = {
     const startOfLastWeek = new Date(startOfWeek);
     startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
 
-    // Get all analyses with user info
-    const { data: analyses, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        id, status, created_at, reviewed_at,
-        profiles:user_id (full_name, email)
-      `)
-      .order('created_at', { ascending: false });
+    // Run count queries and data queries in parallel
+    const [thisWeekResult, lastWeekResult, approvedCountResult, reviewedCountResult, analysesForWriters, stageData] = await Promise.all([
+      // Count scripts this week (server-side)
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+        .gte('created_at', startOfWeek.toISOString()),
+      // Count scripts last week (server-side)
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+        .gte('created_at', startOfLastWeek.toISOString())
+        .lt('created_at', startOfWeek.toISOString()),
+      // Count approved (server-side)
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+        .eq('status', 'APPROVED'),
+      // Count reviewed (not pending) (server-side)
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+        .neq('status', 'PENDING'),
+      // Only fetch data needed for top writers and avg time
+      supabase.from('viral_analyses')
+        .select('status, created_at, reviewed_at, profiles:user_id (full_name, email)')
+        .order('created_at', { ascending: false }),
+      // Stage distribution for approved
+      supabase.from('viral_analyses')
+        .select('production_stage')
+        .eq('status', 'APPROVED'),
+    ]);
 
-    if (error) throw error;
+    const scriptsThisWeek = thisWeekResult.count || 0;
+    const scriptsLastWeek = lastWeekResult.count || 0;
+    const approvedCount = approvedCountResult.count || 0;
+    const reviewedCount = reviewedCountResult.count || 0;
+    const approvalRate = reviewedCount > 0 ? Math.round((approvedCount / reviewedCount) * 100) : 0;
 
-    const allAnalyses = (analyses || []) as any[];
-
-    // Calculate this week's scripts
-    const scriptsThisWeek = allAnalyses.filter((a: any) =>
-      new Date(a.created_at) >= startOfWeek
-    ).length;
-
-    // Calculate last week's scripts
-    const scriptsLastWeek = allAnalyses.filter((a: any) => {
-      const date = new Date(a.created_at);
-      return date >= startOfLastWeek && date < startOfWeek;
-    }).length;
-
-    // Calculate approval rate
-    const reviewed = allAnalyses.filter((a: any) => a.status !== 'PENDING');
-    const approved = reviewed.filter((a: any) => a.status === 'APPROVED');
-    const approvalRate = reviewed.length > 0 ? Math.round((approved.length / reviewed.length) * 100) : 0;
-
-    // Calculate average time to approval (in hours)
-    const approvedWithTimes = approved.filter((a: any) => a.reviewed_at);
+    // Calculate average time to approval (in hours) from fetched data
+    const allAnalyses = (analysesForWriters.data || []) as any[];
+    const approvedWithTimes = allAnalyses.filter((a: any) => a.status === 'APPROVED' && a.reviewed_at);
     let avgTimeToApproval = 0;
     if (approvedWithTimes.length > 0) {
       const totalHours = approvedWithTimes.reduce((sum: number, a: any) => {
@@ -456,7 +458,7 @@ export const adminService = {
       avgTimeToApproval = Math.round(totalHours / approvedWithTimes.length);
     }
 
-    // Get top writers
+    // Get top writers from the same data
     const writerCounts: Record<string, { name: string; count: number }> = {};
     allAnalyses.forEach((a: any) => {
       const name = a.profiles?.full_name || a.profiles?.email || 'Unknown';
@@ -469,14 +471,9 @@ export const adminService = {
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
-    // Get stage distribution
-    const { data: stageData } = await supabase
-      .from('viral_analyses')
-      .select('production_stage')
-      .eq('status', 'APPROVED');
-
+    // Stage distribution
     const stageCounts: Record<string, number> = {};
-    const stageList = (stageData || []) as { production_stage?: string }[];
+    const stageList = ((stageData.data || []) as { production_stage?: string }[]);
     stageList.forEach((a) => {
       const stage = a.production_stage || 'PLANNING';
       stageCounts[stage] = (stageCounts[stage] || 0) + 1;
@@ -551,6 +548,49 @@ export const adminService = {
       videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
     })) as ViralAnalysis[];
+  },
+
+  /**
+   * Get skips for a project (who skipped it)
+   */
+  async getProjectSkips(analysisId: string): Promise<{ id: string; user_id: string; role: string; skipped_at: string; full_name?: string; email?: string }[]> {
+    const { data, error } = await supabase
+      .from('project_skips')
+      .select('id, user_id, role, skipped_at')
+      .eq('analysis_id', analysisId)
+      .order('skipped_at', { ascending: false });
+
+    if (error) throw error;
+
+    const skips = (data || []) as { id: string; user_id: string; role: string; skipped_at: string }[];
+    if (skips.length === 0) return [];
+
+    // Fetch user profiles for skip entries
+    const userIds = [...new Set(skips.map(s => s.user_id))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, email, full_name')
+      .in('id', userIds);
+
+    const profileMap = new Map(Array.isArray(profiles) ? profiles.map((p: any) => [p.id, p]) : []);
+
+    return skips.map(s => ({
+      ...s,
+      full_name: (profileMap.get(s.user_id) as any)?.full_name,
+      email: (profileMap.get(s.user_id) as any)?.email,
+    }));
+  },
+
+  /**
+   * Remove a skip (re-assign project to user's available list)
+   */
+  async removeSkip(skipId: string): Promise<void> {
+    const { error } = await supabase
+      .from('project_skips')
+      .delete()
+      .eq('id', skipId);
+
+    if (error) throw error;
   },
 
   /**

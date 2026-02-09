@@ -146,7 +146,7 @@ export default function EditorMyProjectsPage() {
                     const isNew = isNewAssignment(project);
                     const progress = getEditingProgress(project);
                     const dueInfo = project.deadline ? formatDueDate(project.deadline) : null;
-                    const isUrgent = project.priority === 'urgent' || dueInfo?.isUrgent;
+                    const isUrgent = project.priority === 'URGENT' || dueInfo?.isUrgent;
 
                     return (
                       <Link

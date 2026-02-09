@@ -27,6 +27,8 @@ export interface AuthUser {
   email: string;
   user_metadata?: Record<string, unknown>;
   app_metadata?: Record<string, unknown>;
+  created_at?: string;
+  last_sign_in_at?: string;
 }
 
 export interface AuthSession {
@@ -76,6 +78,40 @@ function _notifyAuthChange(event: string, session: AuthSession | null): void {
 
 // Load saved session on init
 _loadSession();
+
+// ─── Auto-Refresh Fetch Wrapper ─────────────────────────────────────────────────────
+
+/**
+ * Fetch wrapper that automatically refreshes tokens on 401 and retries once
+ */
+export async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  // Add auth header if we have a token
+  const headers = new Headers(options.headers);
+  if (_accessToken) {
+    headers.set('Authorization', `Bearer ${_accessToken}`);
+  }
+
+  const response = await fetch(url, { ...options, headers });
+
+  // If we get 401 and have a refresh token, try refreshing
+  if (response.status === 401 && _refreshToken) {
+    console.log('Token expired, attempting refresh...');
+    const { data, error } = await auth.refreshSession();
+
+    if (!error && data?.session) {
+      // Retry with new token
+      console.log('Token refreshed, retrying request...');
+      headers.set('Authorization', `Bearer ${data.session.access_token}`);
+      return fetch(url, { ...options, headers });
+    } else {
+      console.error('Token refresh failed:', error);
+      // Refresh failed - user needs to log in again
+      _notifyAuthChange('SIGNED_OUT', null);
+    }
+  }
+
+  return response;
+}
 
 // ─── Auth Namespace ────────────────────────────────────────────────────────────────
 
@@ -194,8 +230,40 @@ export const auth = {
     };
   },
 
-  async getAccessToken() {
+  getAccessToken() {
     return _accessToken;
+  },
+
+  async refreshSession(): Promise<{ data: { session: AuthSession } | null; error: { message: string } | null }> {
+    if (!_refreshToken) {
+      return { data: null, error: { message: 'No refresh token available' } };
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: _refreshToken }),
+      });
+
+      if (!res.ok) {
+        _saveSession(null);
+        _notifyAuthChange('SIGNED_OUT', null);
+        return { data: null, error: { message: 'Session expired. Please sign in again.' } };
+      }
+
+      const body = await res.json();
+      const newSession: AuthSession = {
+        access_token: body.access_token,
+        refresh_token: body.refresh_token || _refreshToken,
+        user: _user!,
+      };
+      _saveSession(newSession);
+      _notifyAuthChange('TOKEN_REFRESHED', newSession);
+      return { data: { session: newSession }, error: null };
+    } catch (err) {
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to refresh session' } };
+    }
   },
 
   async changePassword({ currentPassword, newPassword }: { currentPassword?: string; newPassword: string }): Promise<{ data: { success: boolean } | null; error: { message: string } | null }> {

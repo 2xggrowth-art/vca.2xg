@@ -1,38 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Play, Video, Clock, Eye, ExternalLink, Loader2, MapPin, Film, Music } from 'lucide-react';
+import { Video, Clock, ExternalLink, Loader2, MapPin, Download, Search, X } from 'lucide-react';
 import Header from '@/components/Header';
-import { Button } from '@/components/ui';
 import { editorService } from '@/services/editorService';
+import { fetchWithAuth } from '@/lib/api';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
-type FilterType = 'all' | 'shorts' | 'reels' | 'long';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
-// File type icons and labels
-const getFileTypeInfo = (fileType: string) => {
-  const types: Record<string, { icon: string; label: string }> = {
-    'RAW_FOOTAGE': { icon: '🎬', label: 'Raw' },
-    'A_ROLL': { icon: '🎬', label: 'A-Roll' },
-    'B_ROLL': { icon: '🎞️', label: 'B-Roll' },
-    'HOOK': { icon: '🎣', label: 'Hook' },
-    'BODY': { icon: '📝', label: 'Body' },
-    'CTA': { icon: '📢', label: 'CTA' },
-    'AUDIO_CLIP': { icon: '🎵', label: 'Audio' },
-    'OTHER': { icon: '📁', label: 'Other' },
-    'raw-footage': { icon: '🎬', label: 'Raw' },
-  };
-  return types[fileType] || { icon: '📁', label: fileType };
-};
+type FilterType = 'all' | 'shorts' | 'reels' | 'long';
 
 export default function EditorAvailablePage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ViralAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedProject, setSelectedProject] = useState<ViralAnalysis | null>(null);
-  const [showViewer, setShowViewer] = useState(false);
   const [filter, setFilter] = useState<FilterType>('all');
-  const [picking, setPicking] = useState(false);
+  const [pickingId, setPickingId] = useState<string | null>(null);
+  const [zippingId, setZippingId] = useState<string | null>(null);
+  const [zipProgress, setZipProgress] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadProjects();
@@ -52,10 +39,25 @@ export default function EditorAvailablePage() {
   };
 
   const filteredProjects = projects.filter((p) => {
-    if (filter === 'all') return true;
-    if (filter === 'shorts') return p.platform === 'youtube_shorts';
-    if (filter === 'reels') return p.platform === 'instagram_reel';
-    if (filter === 'long') return p.platform === 'youtube_long';
+    // Filter by platform
+    let matchesFilter = true;
+    if (filter !== 'all') {
+      if (filter === 'shorts') matchesFilter = p.platform === 'youtube_shorts';
+      else if (filter === 'reels') matchesFilter = p.platform === 'instagram_reel';
+      else if (filter === 'long') matchesFilter = p.platform === 'youtube_long';
+    }
+    if (!matchesFilter) return false;
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesTitle = p.title?.toLowerCase().includes(query);
+      const matchesId = p.content_id?.toLowerCase().includes(query);
+      const matchesProfile = p.profile?.name?.toLowerCase().includes(query);
+      const matchesVideographer = p.videographer?.full_name?.toLowerCase().includes(query) || p.videographer?.email?.toLowerCase().includes(query);
+      return matchesTitle || matchesId || matchesProfile || matchesVideographer;
+    }
+
     return true;
   });
 
@@ -66,39 +68,66 @@ export default function EditorAvailablePage() {
     long: projects.filter((p) => p.platform === 'youtube_long').length,
   };
 
-  // Get raw files for footage preview grid
-  const getRawFiles = (project: ViralAnalysis) => {
-    const rawTypes = ['RAW_FOOTAGE', 'A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP', 'OTHER', 'raw-footage'];
-    return project.production_files?.filter(
-      (f: any) => rawTypes.includes(f.file_type) && !f.is_deleted
-    ) || [];
-  };
-
-  const openViewer = (project: ViralAnalysis) => {
-    setSelectedProject(project);
-    setShowViewer(true);
-  };
-
   const handlePick = async (projectId: string) => {
     try {
-      setPicking(true);
+      setPickingId(projectId);
       await editorService.pickProject({ analysisId: projectId });
       toast.success('Project picked successfully!');
-      setShowViewer(false);
       navigate(`/editor/project/${projectId}`);
     } catch (error: any) {
       console.error('Failed to pick project:', error);
       toast.error(error.message || 'Failed to pick project');
-      setPicking(false);
+      setPickingId(null);
     }
   };
 
-  const handleReject = (projectId: string) => {
+  const handleSkip = async (projectId: string) => {
     editorService.rejectProject(projectId);
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    setShowViewer(false);
     toast.success('Project hidden from list');
   };
+
+  const handleDownloadAll = useCallback(async (files: any[], projectName: string, projectId: string) => {
+    if (zippingId || files.length === 0) return;
+
+    try {
+      setZippingId(projectId);
+      setZipProgress('Preparing download...');
+
+      // Build backend URL with file IDs
+      const fileIds = files.map((f: any) => f.file_id).filter(Boolean).join(',');
+      const zipName = encodeURIComponent(projectName || 'raw-footage');
+      const url = `${BACKEND_URL}/api/upload/download-zip?fileIds=${fileIds}&name=${zipName}`;
+
+      setZipProgress('Downloading zip...');
+
+      // Use fetchWithAuth - automatically refreshes token on 401 and retries
+      const response = await fetchWithAuth(url);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(errorText || `Download failed: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${projectName || 'raw-footage'}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(a);
+
+      toast.success('Download complete!');
+    } catch (err) {
+      console.error('Zip download failed:', err);
+      toast.error('Download failed. Try downloading files individually.');
+    } finally {
+      setZippingId(null);
+      setZipProgress('');
+    }
+  }, [zippingId]);
 
   const getFileCount = (project: ViralAnalysis) => {
     return project.production_files?.filter((f: any) => !f.is_deleted).length || 0;
@@ -124,6 +153,19 @@ export default function EditorAvailablePage() {
     }
   };
 
+  const getUploadedFiles = (project: ViralAnalysis) => {
+    return project.production_files?.filter((f: any) => !f.is_deleted && f.file_url) || [];
+  };
+
+  const getFileTypeLabel = (fileType: string) => {
+    const types: Record<string, string> = {
+      'RAW_FOOTAGE': 'Raw', 'A_ROLL': 'A-Roll', 'B_ROLL': 'B-Roll',
+      'HOOK': 'Hook', 'BODY': 'Body', 'CTA': 'CTA',
+      'AUDIO_CLIP': 'Audio', 'OTHER': 'Other', 'raw-footage': 'Raw',
+    };
+    return types[fileType] || fileType;
+  };
+
   if (loading) {
     return (
       <>
@@ -140,6 +182,28 @@ export default function EditorAvailablePage() {
       <Header title="Available Projects" subtitle={`${filteredProjects.length} ready for edit`} showBack />
 
       <div className="px-4 py-4">
+        {/* Search Bar */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by title, profile, ID, or videographer..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+            aria-label="Search projects"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              aria-label="Clear search"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
         {/* Filter Tabs */}
         <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-4">
           {[
@@ -169,75 +233,166 @@ export default function EditorAvailablePage() {
 
         {/* Project Cards */}
         <div className="space-y-3">
-          {filteredProjects.map((project, index) => (
-            <div
-              key={project.id}
-              className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden animate-slide-up"
-              style={{ animationDelay: `${index * 0.1}s` }}
-            >
-              <div className="p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{project.title || 'Untitled'}</h3>
-                    <p className="text-sm text-gray-400 font-mono">{project.content_id || 'No ID'}</p>
+          {filteredProjects.map((project, index) => {
+            const fileCount = getFileCount(project);
+            const uploadedFiles = getUploadedFiles(project);
+
+            return (
+              <div
+                key={project.id}
+                className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden animate-slide-up"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                <div className="p-4">
+                  {/* Title row */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-900">{project.title || 'Untitled'}</h3>
+                      {project.profile?.name && (
+                        <p className="text-sm text-green-600 font-medium mb-1">
+                          🎯 {project.profile.name}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-400 font-mono">{project.content_id || 'No ID'}</p>
+                    </div>
+                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-[11px] font-semibold rounded-full shrink-0 ml-2">
+                      {getPlatformLabel(project.platform)}
+                    </span>
                   </div>
-                  <span className="px-2 py-1 bg-blue-100 text-blue-700 text-[11px] font-semibold rounded-full">
-                    {getPlatformLabel(project.platform)}
-                  </span>
-                </div>
 
-                <div className="flex items-center gap-2 flex-wrap mb-3">
-                  <span className="text-xs px-2 py-1 bg-primary/10 rounded text-primary font-medium">
-                    {project.profile?.name || 'No profile'}
-                  </span>
-                  <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
-                    <Video className="w-3 h-3 inline mr-1" />
-                    {getFileCount(project)} files
-                  </span>
-                  <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
-                    {getTotalSize(project)}
-                  </span>
-                  {project.shoot_type && (
-                    <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {project.shoot_type}
+                  {/* Tags */}
+                  <div className="flex items-center gap-2 flex-wrap mb-3">
+                    <span className="text-xs px-2 py-1 bg-green-50 rounded text-green-600 font-medium flex items-center gap-1">
+                      <Video className="w-3 h-3" />
+                      {fileCount} files
                     </span>
-                  )}
-                  {project.deadline && (
                     <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
-                      <Clock className="w-3 h-3 inline mr-1" />
-                      {new Date(project.deadline).toLocaleDateString()}
+                      {getTotalSize(project)}
                     </span>
+                    {project.shoot_type && (
+                      <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {project.shoot_type}
+                      </span>
+                    )}
+                    {project.deadline && (
+                      <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
+                        <Clock className="w-3 h-3 inline mr-1" />
+                        {new Date(project.deadline).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Videographer info + Reference link row */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100 mb-3">
+                    {project.videographer && (
+                      <>
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-[10px] font-semibold text-white shrink-0">
+                          {(project.videographer.full_name || project.videographer.email || '?')
+                            .split(' ')
+                            .map((n: string) => n[0])
+                            .slice(0, 2)
+                            .join('')
+                            .toUpperCase()}
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          Shot by {project.videographer.full_name || project.videographer.email}
+                        </span>
+                      </>
+                    )}
+                    {project.reference_url && (
+                      <a
+                        href={project.reference_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto text-xs text-primary font-medium flex items-center gap-1"
+                      >
+                        View Reference <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Uploaded footage files with Drive links */}
+                  {uploadedFiles.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Uploaded Footage</p>
+                      <div className="bg-gray-50 rounded-lg divide-y divide-gray-100">
+                        {uploadedFiles.map((file: any) => (
+                          <a
+                            key={file.id}
+                            href={file.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-3 p-2.5"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                              <Video className="w-4 h-4 text-green-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-blue-600 truncate">{file.file_name}</p>
+                              <div className="flex items-center gap-2">
+                                {file.file_size && (
+                                  <span className="text-[11px] text-gray-400">
+                                    {(file.file_size / 1024 / 1024).toFixed(1)} MB
+                                  </span>
+                                )}
+                                <span className="text-[11px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded">
+                                  {getFileTypeLabel(file.file_type)}
+                                </span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                      {/* Download All Zip Button */}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleDownloadAll(uploadedFiles, project.content_id || project.title || 'raw-footage', project.id);
+                        }}
+                        disabled={zippingId === project.id}
+                        className="w-full flex items-center justify-center gap-2 p-3 bg-editor/10 rounded-lg text-editor font-semibold text-sm active:bg-editor/20 disabled:opacity-60"
+                      >
+                        {zippingId === project.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span className="truncate">{zipProgress}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            Download All ({getTotalSize(project)})
+                          </>
+                        )}
+                      </button>
+                    </div>
                   )}
-                </div>
 
-                {/* Videographer info */}
-                {project.videographer && (
-                  <p className="text-xs text-gray-500 mb-3">
-                    Shot by: {project.videographer.full_name || project.videographer.email}
-                  </p>
-                )}
-
-                {/* Action Buttons */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => openViewer(project)}
-                    className="flex-1 h-10 flex items-center justify-center gap-2 bg-gray-100 rounded-lg text-sm font-medium text-gray-700 active:bg-gray-200"
-                  >
-                    <Eye className="w-4 h-4" />
-                    View Details
-                  </button>
-                  <button
-                    onClick={() => handlePick(project.id)}
-                    disabled={picking}
-                    className="flex-1 h-10 flex items-center justify-center gap-2 bg-editor rounded-lg text-sm font-medium text-white active:opacity-90 disabled:opacity-50"
-                  >
-                    {picking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Pick Project'}
-                  </button>
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleSkip(project.id)}
+                      className="flex-1 h-10 flex items-center justify-center bg-gray-100 rounded-lg text-sm font-medium text-gray-700 active:bg-gray-200"
+                    >
+                      Skip
+                    </button>
+                    <button
+                      onClick={() => handlePick(project.id)}
+                      disabled={pickingId === project.id}
+                      className="flex-[2] h-10 flex items-center justify-center gap-2 bg-editor rounded-lg text-sm font-semibold text-white active:opacity-90 disabled:opacity-50"
+                    >
+                      {pickingId === project.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        'Pick to Edit'
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {filteredProjects.length === 0 && (
@@ -248,124 +403,6 @@ export default function EditorAvailablePage() {
           </div>
         )}
       </div>
-
-      {/* Project Viewer Modal */}
-      {showViewer && selectedProject && (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col">
-          {/* Header */}
-          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between p-4 bg-gradient-to-b from-black/60 to-transparent">
-            <div>
-              <h3 className="text-white font-semibold">{selectedProject.title || 'Untitled'}</h3>
-              <p className="text-white/70 text-sm">{selectedProject.content_id || 'No ID'}</p>
-            </div>
-            <button
-              onClick={() => setShowViewer(false)}
-              className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center"
-            >
-              <X className="w-5 h-5 text-white" />
-            </button>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 flex items-center justify-center px-4 pt-20 pb-48 overflow-y-auto">
-            <div className="bg-white/10 rounded-2xl p-6 w-full max-w-sm">
-              {selectedProject.reference_url ? (
-                <a
-                  href={selectedProject.reference_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-center mb-6"
-                >
-                  <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-4 mx-auto">
-                    <Play className="w-10 h-10 text-white ml-1" />
-                  </div>
-                  <p className="text-white/70 text-sm mb-2">Reference Video</p>
-                  <span className="inline-flex items-center gap-1 text-primary text-sm">
-                    Open in app <ExternalLink className="w-3 h-3" />
-                  </span>
-                </a>
-              ) : (
-                <div className="text-center mb-6">
-                  <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-4 mx-auto">
-                    <Play className="w-10 h-10 text-white/50 ml-1" />
-                  </div>
-                  <p className="text-white/50 text-sm">No reference video</p>
-                </div>
-              )}
-
-              {/* Why Viral */}
-              {selectedProject.why_viral && (
-                <div className="mb-4">
-                  <h4 className="text-white/60 text-xs uppercase tracking-wide mb-2">Why It's Viral</h4>
-                  <p className="text-white text-sm">{selectedProject.why_viral}</p>
-                </div>
-              )}
-
-              {/* How to Replicate */}
-              {selectedProject.how_to_replicate && (
-                <div className="mb-4">
-                  <h4 className="text-white/60 text-xs uppercase tracking-wide mb-2">How to Replicate</h4>
-                  <p className="text-white text-sm whitespace-pre-wrap">{selectedProject.how_to_replicate}</p>
-                </div>
-              )}
-
-              {/* Footage Preview Grid */}
-              <div>
-                <h4 className="text-white/60 text-xs uppercase tracking-wide mb-3">Uploaded Footage</h4>
-                <div className="grid grid-cols-3 gap-2">
-                  {getRawFiles(selectedProject).slice(0, 6).map((file: any) => {
-                    const typeInfo = getFileTypeInfo(file.file_type);
-                    return (
-                      <div key={file.id} className="bg-white/10 rounded-lg p-2 text-center">
-                        <div className="text-xl mb-1">{typeInfo.icon}</div>
-                        <p className="text-white text-[10px] truncate">{file.file_name?.split('.')[0] || 'file'}</p>
-                        <p className="text-white/50 text-[9px]">{typeInfo.label}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-white/50 text-xs text-center mt-2">
-                  {getRawFiles(selectedProject).length} files • {getTotalSize(selectedProject)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Actions */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 pb-safe bg-gradient-to-t from-black/80 to-transparent">
-            <div className="flex items-center gap-2 mb-4 overflow-x-auto hide-scrollbar">
-              <span className="px-3 py-1.5 bg-white/20 rounded-full text-white text-sm whitespace-nowrap">
-                {selectedProject.profile?.name || 'No profile'}
-              </span>
-              <span className="px-3 py-1.5 bg-white/20 rounded-full text-white text-sm whitespace-nowrap">
-                {getFileCount(selectedProject)} files
-              </span>
-              {selectedProject.deadline && (
-                <span className="px-3 py-1.5 bg-white/20 rounded-full text-white text-sm whitespace-nowrap">
-                  Due: {new Date(selectedProject.deadline).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                className="flex-1 bg-white/10 border-white/20 text-white"
-                onClick={() => handleReject(selectedProject.id)}
-              >
-                Skip
-              </Button>
-              <Button
-                className="flex-1 bg-editor"
-                onClick={() => handlePick(selectedProject.id)}
-                disabled={picking}
-              >
-                {picking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Pick This Project'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

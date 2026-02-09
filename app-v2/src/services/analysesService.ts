@@ -45,15 +45,28 @@ export const analysesService = {
    * Get stats for current user's analyses
    */
   async getMyStats(): Promise<AnalysisStats> {
-    const analyses = await this.getMyAnalyses();
+    const { data: { user } } = await auth.getUser();
+    if (!user) throw new Error('Not authenticated');
 
-    const total = analyses.length;
-    const pending = analyses.filter(a => a.status === 'PENDING').length;
-    const approved = analyses.filter(a => a.status === 'APPROVED').length;
-    const rejected = analyses.filter(a => a.status === 'REJECTED').length;
+    // Use server-side count queries instead of fetching all records
+    const [totalResult, pendingResult, approvedResult, rejectedResult] = await Promise.all([
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'PENDING'),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'APPROVED'),
+      supabase.from('viral_analyses').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'REJECTED'),
+    ]);
+
+    const total = totalResult.count || 0;
+    const approved = approvedResult.count || 0;
     const approvalRate = total > 0 ? Math.round((approved / total) * 100) : 0;
 
-    return { total, pending, approved, rejected, approvalRate };
+    return {
+      total,
+      pending: pendingResult.count || 0,
+      approved,
+      rejected: rejectedResult.count || 0,
+      approvalRate,
+    };
   },
 
   /**
@@ -87,24 +100,55 @@ export const analysesService = {
    * Get pending analyses for current user
    */
   async getPendingAnalyses(): Promise<ViralAnalysis[]> {
-    const analyses = await this.getMyAnalyses();
-    return analyses.filter(a => a.status === 'PENDING');
+    const { data: { user } } = await auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('viral_analyses')
+      .select('*, industry:industries(id, name, short_code), profile:profile_list(id, name)')
+      .eq('user_id', user.id)
+      .eq('status', 'PENDING')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as ViralAnalysis[];
   },
 
   /**
    * Get approved analyses for current user
    */
   async getApprovedAnalyses(): Promise<ViralAnalysis[]> {
-    const analyses = await this.getMyAnalyses();
-    return analyses.filter(a => a.status === 'APPROVED');
+    const { data: { user } } = await auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('viral_analyses')
+      .select('*, industry:industries(id, name, short_code), profile:profile_list(id, name)')
+      .eq('user_id', user.id)
+      .eq('status', 'APPROVED')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as ViralAnalysis[];
   },
 
   /**
    * Get rejected analyses for current user
    */
   async getRejectedAnalyses(): Promise<ViralAnalysis[]> {
-    const analyses = await this.getMyAnalyses();
-    return analyses.filter(a => a.status === 'REJECTED' && !a.is_dissolved);
+    const { data: { user } } = await auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('viral_analyses')
+      .select('*, industry:industries(id, name, short_code), profile:profile_list(id, name)')
+      .eq('user_id', user.id)
+      .eq('status', 'REJECTED')
+      .eq('is_dissolved', false)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as ViralAnalysis[];
   },
 
   /**
@@ -176,9 +220,6 @@ export const analysesService = {
         shoot_type: formData.shootType || null,
         creator_name: formData.creatorName || null,
         works_without_audio: formData.worksWithoutAudio || null,
-
-        // Hook types stored as JSON array
-        hook_types: formData.hookTypes || [],
 
         // Profile/Industry
         profile_id: formData.profileId || null,

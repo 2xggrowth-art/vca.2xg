@@ -9,8 +9,6 @@ import toast from 'react-hot-toast';
 
 const SHOOT_TYPES = ['Indoor', 'Outdoor'];
 
-const HOOK_TYPES = ['Visual Hook', 'Audio Hook', 'SFX Hook', 'Onscreen Hook'];
-
 const YES_NO_MAYBE = ['Yes', 'No', 'Maybe'];
 
 const INITIAL_FORM_DATA: AnalysisFormData = {
@@ -18,7 +16,6 @@ const INITIAL_FORM_DATA: AnalysisFormData = {
   title: '',
   shootType: '',
   creatorName: '',
-  hookTypes: [],
   worksWithoutAudio: '',
   profileId: '',
 };
@@ -102,14 +99,6 @@ export default function VideographerNewScriptPage() {
     value: AnalysisFormData[K]
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const toggleHookType = (hookType: string) => {
-    const current = formData.hookTypes || [];
-    const updated = current.includes(hookType)
-      ? current.filter((t) => t !== hookType)
-      : [...current, hookType];
-    updateField('hookTypes', updated);
   };
 
   const validateForm = (): boolean => {
@@ -334,32 +323,6 @@ export default function VideographerNewScriptPage() {
             placeholder="@username or channel name"
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-videographer focus:border-videographer"
           />
-        </div>
-
-        {/* Hook Type */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-900 mb-1.5">
-            Hook Type <span className="text-gray-400 font-normal">(select all)</span>
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            {HOOK_TYPES.map((type) => {
-              const isSelected = (formData.hookTypes || []).includes(type);
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => toggleHookType(type)}
-                  className={`px-3 py-1.5 rounded-full font-medium text-xs transition-all active:scale-95 ${
-                    isSelected
-                      ? 'bg-videographer text-white'
-                      : 'bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  {type}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         {/* Works Without Audio */}

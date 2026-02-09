@@ -139,7 +139,7 @@ export default function TeamPage() {
     setShowAddModal(true);
   };
 
-  const openEditModal = (member: TeamMember) => {
+  const closeEditModal = (member: TeamMember) => {
     setEditingMember(member);
     setModalData({
       name: member.full_name || '',

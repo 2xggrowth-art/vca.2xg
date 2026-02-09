@@ -24,7 +24,10 @@ class GoogleDriveUploadService {
 
       this.auth = new google.auth.GoogleAuth({
         credentials,
-        scopes: ['https://www.googleapis.com/auth/drive.file'],
+        scopes: [
+          'https://www.googleapis.com/auth/drive.file', // Create/manage files created by this app
+          'https://www.googleapis.com/auth/drive.readonly', // Read all files the service account has access to
+        ],
       });
 
       this.drive = google.drive({ version: 'v3', auth: this.auth });
@@ -69,6 +72,7 @@ class GoogleDriveUploadService {
           body: bufferStream,
         },
         fields: 'id, name, webViewLink, webContentLink, size',
+        supportsAllDrives: true, // Support Shared Drives to avoid service account quota issues
       });
 
       console.log(`✅ Uploaded: ${response.data.name} (ID: ${response.data.id})`);
@@ -101,6 +105,7 @@ class GoogleDriveUploadService {
           role: 'reader',
           type: 'anyone',
         },
+        supportsAllDrives: true, // Support Shared Drives
       });
       console.log(`🔓 Made file ${fileId} publicly accessible`);
     } catch (error) {
@@ -126,6 +131,7 @@ class GoogleDriveUploadService {
           parents: [parentFolderId],
         },
         fields: 'id, name',
+        supportsAllDrives: true, // Support Shared Drives
       });
 
       console.log(`📁 Created folder: ${response.data.name} (ID: ${response.data.id})`);
@@ -150,6 +156,8 @@ class GoogleDriveUploadService {
         q: `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
         fields: 'files(id, name)',
         spaces: 'drive',
+        supportsAllDrives: true, // Support Shared Drives
+        includeItemsFromAllDrives: true, // Include files from all drives
       });
 
       if (response.data.files && response.data.files.length > 0) {
@@ -199,12 +207,29 @@ class GoogleDriveUploadService {
     try {
       await this.drive.files.delete({
         fileId: fileId,
+        supportsAllDrives: true, // Support Shared Drives
       });
       console.log(`🗑️  Deleted file: ${fileId}`);
     } catch (error) {
       console.error('❌ Delete error:', error.message);
       throw new Error(`Failed to delete file: ${error.message}`);
     }
+  }
+
+  /**
+   * Download file from Google Drive as a readable stream
+   * @param {string} fileId - File ID
+   * @returns {Promise<import('stream').Readable>} - Readable stream
+   */
+  async downloadFileStream(fileId) {
+    await this.initialize();
+
+    const response = await this.drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    return response.data;
   }
 
   /**
@@ -219,6 +244,7 @@ class GoogleDriveUploadService {
       const response = await this.drive.files.get({
         fileId: fileId,
         fields: 'id, name, mimeType, size, createdTime, modifiedTime, webViewLink',
+        supportsAllDrives: true, // Support Shared Drives
       });
 
       return response.data;

@@ -212,6 +212,13 @@ class GoogleDriveOAuthService {
    * Sign out from Google
    */
   async signOut(): Promise<void> {
+    // Abort all active uploads before revoking token
+    for (const [key, xhr] of this.activeUploads) {
+      xhr.abort();
+      console.log(`Aborted upload on sign-out: ${key}`);
+    }
+    this.activeUploads.clear();
+
     if (this.accessToken) {
       google.accounts.oauth2.revoke(this.accessToken, () => {
         console.log('Access token revoked');
@@ -219,6 +226,9 @@ class GoogleDriveOAuthService {
       this.accessToken = null;
       gapi.client.setToken(null);
     }
+
+    this.tokenClient = null;
+    this.gisInited = false;
   }
 
   /**

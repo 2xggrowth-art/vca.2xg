@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Upload, Video, X, CheckCircle, AlertCircle, Loader2, Film, Mic, Play, FileVideo, Trash2 } from 'lucide-react';
+import { Upload, Video, X, CheckCircle, AlertCircle, Loader2, Film, Mic, Play, FileVideo, Trash2, ExternalLink } from 'lucide-react';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui';
 import toast from 'react-hot-toast';
@@ -49,6 +49,7 @@ export default function UploadPage() {
   const [_currentUploadIndex, setCurrentUploadIndex] = useState(-1);
   const [selectedFileType, setSelectedFileType] = useState<FileType>('A_ROLL');
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
+  const [productionNotes, setProductionNotes] = useState('');
 
   // Google OAuth state
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -209,15 +210,24 @@ export default function UploadPage() {
         );
 
         // Record file in database with selected file type
-        await productionFilesService.createFileRecord({
-          analysisId: project.id,
-          fileType: selectedFileType,
-          fileName: file.file.name,
-          fileUrl: result.webViewLink,
-          fileId: result.fileId,
-          fileSize: result.size,
-          mimeType: file.file.type,
-        });
+        try {
+          const dbRecord = await productionFilesService.createFileRecord({
+            analysisId: project.id,
+            fileType: selectedFileType,
+            fileName: file.file.name,
+            fileUrl: result.webViewLink,
+            fileId: result.fileId,
+            fileSize: result.size,
+            mimeType: file.file.type,
+          });
+          console.log('[UploadPage] File record saved to DB:', dbRecord);
+        } catch (dbError: any) {
+          console.error('Failed to save file record to database:', dbError);
+          const errMsg = dbError?.message || dbError?.details || 'Database error';
+          toast.error(`File uploaded to Drive but failed to save record: ${errMsg}`);
+          // Still mark as error since the DB record is needed
+          throw new Error(`File uploaded to Drive but database record failed: ${errMsg}`);
+        }
 
         // Mark as complete
         setFiles((prev) =>
@@ -257,11 +267,21 @@ export default function UploadPage() {
     // Reload project to get updated file list
     await loadProject();
 
-    const completedFiles = files.filter((f) => f.status === 'complete').length;
-    const newlyCompleted = files.filter((f) => f.status !== 'complete').length;
-    if (completedFiles + newlyCompleted === files.length) {
+    // Read current file states without calling toast inside updater (avoids React setState-in-render)
+    let completedCount = 0;
+    let failedCount = 0;
+    setFiles((prev) => {
+      completedCount = prev.filter((f) => f.status === 'complete').length;
+      failedCount = prev.filter((f) => f.status === 'error').length;
+      return prev; // Don't modify yet
+    });
+
+    // Show toasts outside of setState to avoid React render warnings
+    if (failedCount > 0) {
+      toast.error(`${failedCount} file(s) failed to upload. Check errors above.`);
+      setFiles((prev) => prev.filter((f) => f.status !== 'complete'));
+    } else if (completedCount > 0) {
       toast.success('All files uploaded successfully!');
-      // Clear the upload queue after successful upload
       setFiles([]);
     }
   };
@@ -277,7 +297,7 @@ export default function UploadPage() {
     }
 
     try {
-      await videographerService.markShootingComplete(project.id);
+      await videographerService.markShootingComplete(project.id, productionNotes || undefined);
       toast.success('Shooting marked as complete!');
       navigate('/videographer/my-projects');
     } catch (error) {
@@ -356,11 +376,11 @@ export default function UploadPage() {
     <>
       <Header
         title="Upload Footage"
-        subtitle={`${project.content_id || 'Project'} • ${project.title || project.hook?.slice(0, 30) || 'Untitled'}`}
+        subtitle={project.profile?.name ? `🎯 ${project.profile.name}` : `${project.content_id || 'Project'} • ${project.title || project.hook?.slice(0, 30) || 'Untitled'}`}
         showBack
       />
 
-      <div className="px-4 py-4 pb-32">
+      <div className="px-4 py-4 pb-56">
         {/* Project Info Card */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
           <div className="flex items-start gap-3">
@@ -372,7 +392,12 @@ export default function UploadPage() {
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-gray-900 truncate">{project.title || 'Untitled'}</h3>
-              <p className="text-sm text-gray-400 font-mono">{project.content_id || 'No ID'}</p>
+              {project.profile?.name && (
+                <p className="text-sm text-orange-600 font-medium mb-1">
+                  🎯 {project.profile.name}
+                </p>
+              )}
+              <p className="text-xs text-gray-400 font-mono">{project.content_id || 'No ID'}</p>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
                   {platform.emoji} {platform.label}
@@ -588,7 +613,20 @@ export default function UploadPage() {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate text-sm">{file.file_name}</p>
+                    {file.file_url ? (
+                      <a
+                        href={file.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-blue-600 truncate text-sm flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="truncate">{file.file_name}</span>
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
+                    ) : (
+                      <p className="font-medium text-gray-900 truncate text-sm">{file.file_name}</p>
+                    )}
                     <div className="flex items-center gap-2">
                       {file.file_size && (
                         <span className="text-xs text-gray-400">
@@ -619,9 +657,9 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Fixed Bottom Buttons */}
-      <div className="fixed bottom-0 left-0 right-0 px-4 py-4 pb-safe bg-white border-t border-gray-100 max-w-mobile mx-auto">
-        <div className="flex gap-3">
+      {/* Fixed Bottom Buttons - positioned above bottom nav + FAB */}
+      <div className="fixed bottom-[100px] left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40">
+        <div className="flex flex-col gap-2">
           {isUploading ? (
             <Button fullWidth size="lg" variant="outline" onClick={cancelUpload}>
               Cancel Upload
@@ -637,35 +675,69 @@ export default function UploadPage() {
               {isSigningIn ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
               Sign in to Google
             </Button>
-          ) : isSignedIn && files.length > 0 && completedCount < files.length ? (
-            <Button
-              fullWidth
-              size="lg"
-              className="bg-orange-500 hover:bg-orange-600"
-              onClick={uploadFiles}
-            >
-              <Upload className="w-5 h-5" />
-              Upload {files.length} {files.length === 1 ? 'File' : 'Files'}
-            </Button>
           ) : (
-            <div className="flex gap-3 w-full">
-              {existingFiles.length > 0 && (
+            <>
+              {/* Upload button when files are pending */}
+              {isSignedIn && files.length > 0 && completedCount < files.length && (
                 <Button
                   fullWidth
                   size="lg"
-                  variant="success"
-                  onClick={handleMarkComplete}
+                  className="bg-orange-500 hover:bg-orange-600"
+                  onClick={uploadFiles}
                 >
-                  <CheckCircle className="w-5 h-5" />
-                  Mark Complete
+                  <Upload className="w-5 h-5" />
+                  Upload {files.length} {files.length === 1 ? 'File' : 'Files'}
                 </Button>
               )}
-              {existingFiles.length === 0 && isSignedIn && (
-                <div className="w-full text-center text-sm text-gray-400 py-3">
-                  Add files above to upload
+
+              {/* Production Notes (optional) */}
+              {isSignedIn && existingFiles.length > 0 && (
+                <div className="space-y-2">
+                  <label htmlFor="production-notes" className="block text-sm font-medium text-gray-700">
+                    Production Notes <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    id="production-notes"
+                    placeholder="Add any notes for the editor (e.g., special shots, lighting info, challenges faced, preferred takes...)"
+                    value={productionNotes}
+                    onChange={(e) => setProductionNotes(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                    aria-label="Production notes for editor"
+                  />
+                  <p className="text-xs text-gray-500">
+                    These notes will help the editor understand your footage and creative decisions
+                  </p>
                 </div>
               )}
-            </div>
+
+              {/* Mark Complete button - always visible when signed in */}
+              <Button
+                fullWidth
+                size="lg"
+                variant="success"
+                onClick={handleMarkComplete}
+                disabled={existingFiles.length === 0}
+              >
+                <CheckCircle className="w-5 h-5" />
+                Mark Shoot Complete
+              </Button>
+
+              {/* Warning when no files uploaded yet */}
+              {existingFiles.length === 0 && (
+                <p className="text-xs text-center text-amber-500">
+                  Upload at least one file to mark as complete
+                </p>
+              )}
+
+              {/* Save & Continue Later */}
+              <button
+                onClick={() => navigate('/videographer/my-projects')}
+                className="w-full text-center text-sm text-gray-500 font-medium py-2 hover:text-gray-700"
+              >
+                Save & Continue Later
+              </button>
+            </>
           )}
         </div>
       </div>

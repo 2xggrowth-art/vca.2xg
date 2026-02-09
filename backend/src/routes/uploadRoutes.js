@@ -177,6 +177,74 @@ router.post('/final-video', verifyAuth, upload.single('file'), async (req, res) 
 });
 
 /**
+ * Download multiple files as a streamed zip
+ * GET /api/upload/download-zip?fileIds=id1,id2&name=project-name
+ * Streams files from Google Drive through the server into a zip — no buffering in memory.
+ */
+router.get('/download-zip', verifyAuth, async (req, res) => {
+  const archiver = require('archiver');
+
+  try {
+    const { fileIds, name } = req.query;
+    if (!fileIds) {
+      return res.status(400).json({ error: 'fileIds query parameter required' });
+    }
+
+    const ids = fileIds.split(',').filter(Boolean);
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'No file IDs provided' });
+    }
+
+    const zipName = `${name || 'raw-footage'}.zip`;
+
+    // Collect file streams before starting the zip response.
+    // This way if ALL files fail we can return a proper error instead of an empty zip.
+    const entries = [];
+    for (const fileId of ids) {
+      try {
+        const metadata = await googleDriveUploadService.getFileMetadata(fileId);
+        const fileStream = await googleDriveUploadService.downloadFileStream(fileId);
+        entries.push({ stream: fileStream, name: metadata.name, size: parseInt(metadata.size, 10) || undefined });
+        console.log(`✅ Prepared file for zip: ${metadata.name} (${metadata.size} bytes)`);
+      } catch (err) {
+        console.error(`⚠️  Skipping file ${fileId}:`, err.message);
+      }
+    }
+
+    if (entries.length === 0) {
+      return res.status(404).json({ error: 'No files could be downloaded from Google Drive' });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(zipName)}"`);
+
+    // Use DEFLATE level 0 (no compression) — more compatible than STORE mode with streamed entries
+    const archive = archiver('zip', { zlib: { level: 0 } });
+
+    archive.on('error', (err) => {
+      console.error('Archiver error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to create zip' });
+      }
+    });
+
+    archive.pipe(res);
+
+    for (const entry of entries) {
+      archive.append(entry.stream, { name: entry.name });
+    }
+
+    await archive.finalize();
+    console.log(`📦 Zip finalized: ${zipName} with ${entries.length} file(s)`);
+  } catch (error) {
+    console.error('Zip download error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+/**
  * Delete file
  * DELETE /api/upload/:fileId
  */

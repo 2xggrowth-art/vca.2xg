@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, X, ChevronUp, ChevronDown, Play, ExternalLink, Eye } from 'lucide-react';
+import { Loader2, X, ChevronUp, ChevronDown, Play, ExternalLink, Eye, Search } from 'lucide-react';
 import Header from '@/components/Header';
 import { videographerService } from '@/services/videographerService';
 import type { ViralAnalysis } from '@/types';
@@ -62,6 +62,7 @@ export default function AvailablePage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
   const [picking, setPicking] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Reels viewer state
   const [showReelsViewer, setShowReelsViewer] = useState(false);
@@ -85,16 +86,35 @@ export default function AvailablePage() {
   };
 
   const filteredProjects = projects.filter((p) => {
-    if (filter === 'all') return true;
-    if (filter === 'high_priority') return p.priority === 'URGENT' || p.priority === 'HIGH';
-    return p.shoot_type === filter;
+    // Filter by type/priority
+    let matchesFilter = true;
+    if (filter !== 'all') {
+      if (filter === 'high_priority') {
+        matchesFilter = p.priority === 'URGENT' || p.priority === 'HIGH';
+      } else {
+        matchesFilter = p.shoot_type?.toLowerCase() === filter;
+      }
+    }
+    if (!matchesFilter) return false;
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesTitle = p.title?.toLowerCase().includes(query);
+      const matchesId = p.content_id?.toLowerCase().includes(query);
+      const matchesProfile = p.profile?.name?.toLowerCase().includes(query);
+      const matchesAuthor = p.full_name?.toLowerCase().includes(query) || p.email?.toLowerCase().includes(query);
+      return matchesTitle || matchesId || matchesProfile || matchesAuthor;
+    }
+
+    return true;
   });
 
   const counts = {
     all: projects.length,
     high_priority: projects.filter((p) => p.priority === 'URGENT' || p.priority === 'HIGH').length,
-    indoor: projects.filter((p) => p.shoot_type === 'indoor').length,
-    outdoor: projects.filter((p) => p.shoot_type === 'outdoor').length,
+    indoor: projects.filter((p) => p.shoot_type?.toLowerCase() === 'indoor').length,
+    outdoor: projects.filter((p) => p.shoot_type?.toLowerCase() === 'outdoor').length,
   };
 
   // Get category emoji based on title/industry
@@ -160,7 +180,7 @@ export default function AvailablePage() {
     }
   };
 
-  const handleReject = (projectId: string, inViewer = false) => {
+  const handleReject = async (projectId: string, inViewer = false) => {
     videographerService.rejectProject(projectId);
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
     toast.success('Project skipped');
@@ -245,6 +265,28 @@ export default function AvailablePage() {
       <Header title="Available Projects" subtitle={`${filteredProjects.length} projects ready for shooting`} showBack />
 
       <div className="px-4 py-4">
+        {/* Search Bar */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by title, profile, ID, or author..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            aria-label="Search projects"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              aria-label="Clear search"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
         {/* Filter Tabs */}
         <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-3 mb-2">
           {[
@@ -303,8 +345,17 @@ export default function AvailablePage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-gray-900 truncate">{project.title || 'Untitled'}</h3>
-                      <p className="text-sm text-gray-400 font-mono">
-                        {project.content_id || 'No ID yet'} • <span className="font-sans">By {authorName}</span>
+                      <p className="text-sm text-gray-500 mb-1">
+                        {project.profile?.name ? (
+                          <>
+                            <span className="font-medium text-orange-600">🎯 {project.profile.name}</span>
+                            {' • '}
+                          </>
+                        ) : null}
+                        <span className="text-gray-400">Script by {authorName}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {project.content_id || 'No ID yet'}
                       </p>
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
@@ -328,13 +379,15 @@ export default function AvailablePage() {
                     <button
                       onClick={() => openReelsViewer(index)}
                       className="h-10 px-4 flex items-center justify-center gap-1.5 bg-gray-100 rounded-lg text-sm font-medium text-gray-700 active:bg-gray-200"
+                      aria-label={`View reference video for ${project.title || 'project'}`}
                     >
-                      <Eye className="w-4 h-4" />
+                      <Eye className="w-4 h-4" aria-hidden="true" />
                       View
                     </button>
                     <button
                       onClick={() => handleReject(project.id)}
                       className="h-10 px-4 flex items-center justify-center bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 active:bg-gray-50"
+                      aria-label={`Skip ${project.title || 'project'}`}
                     >
                       Skip
                     </button>
@@ -342,6 +395,8 @@ export default function AvailablePage() {
                       onClick={() => handlePick(project.id)}
                       disabled={picking === project.id}
                       className="flex-1 h-10 flex items-center justify-center gap-2 bg-green-500 rounded-lg text-sm font-medium text-white active:bg-green-600 disabled:opacity-50"
+                      aria-label={`Pick ${project.title || 'project'} for shooting`}
+                      aria-busy={picking === project.id}
                     >
                       {picking === project.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Pick Project'}
                     </button>
@@ -363,13 +418,14 @@ export default function AvailablePage() {
 
       {/* Reels Viewer Modal - rendered via portal to be above everything */}
       {showReelsViewer && currentProject && createPortal(
-        <div className="fixed inset-0 bg-black z-[9999] flex flex-col">
+        <div className="fixed inset-0 bg-black z-[9999] flex flex-col" role="dialog" aria-modal="true" aria-label="Reference video viewer">
           {/* Close Button */}
           <button
             onClick={() => setShowReelsViewer(false)}
             className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-black/50 flex items-center justify-center"
+            aria-label="Close video viewer"
           >
-            <X className="w-6 h-6 text-white" />
+            <X className="w-6 h-6 text-white" aria-hidden="true" />
           </button>
 
           {/* Navigation Arrows */}
@@ -378,15 +434,17 @@ export default function AvailablePage() {
               onClick={goToPrevReel}
               disabled={currentReelIndex === 0}
               className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center disabled:opacity-30"
+              aria-label="Previous project"
             >
-              <ChevronUp className="w-6 h-6 text-white" />
+              <ChevronUp className="w-6 h-6 text-white" aria-hidden="true" />
             </button>
             <button
               onClick={goToNextReel}
               disabled={currentReelIndex === filteredProjects.length - 1}
               className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center disabled:opacity-30"
+              aria-label="Next project"
             >
-              <ChevronDown className="w-6 h-6 text-white" />
+              <ChevronDown className="w-6 h-6 text-white" aria-hidden="true" />
             </button>
           </div>
 
@@ -485,12 +543,19 @@ export default function AvailablePage() {
           {/* Project Info Overlay */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/90 to-transparent pt-16">
             <div className="px-4 pb-8">
-              {/* Title and ID */}
+              {/* Title and Profile */}
               <h2 className="text-xl font-bold text-white mb-1">
                 {currentProject.title || 'Untitled'}
               </h2>
-              <p className="text-white/60 text-sm font-mono mb-3">
-                {currentProject.content_id || 'No ID yet'} • By {currentProject.full_name || currentProject.email?.split('@')[0] || 'Unknown'}
+              {currentProject.profile?.name && (
+                <p className="text-orange-400 text-base font-semibold mb-1">
+                  🎯 {currentProject.profile.name}
+                </p>
+              )}
+              <p className="text-white/60 text-sm mb-3">
+                <span className="font-mono">{currentProject.content_id || 'No ID yet'}</span>
+                {' • '}
+                <span>Script by {currentProject.full_name || currentProject.email?.split('@')[0] || 'Unknown'}</span>
               </p>
 
               {/* Tags */}

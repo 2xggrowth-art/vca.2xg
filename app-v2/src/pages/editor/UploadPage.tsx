@@ -180,7 +180,7 @@ export default function EditorUploadPage() {
     <>
       <Header
         title="Upload Final Edit"
-        subtitle={`${project.content_id || 'Project'} • ${project.title || project.hook?.slice(0, 30) || 'Untitled'}`}
+        subtitle={project.profile?.name ? `🎯 ${project.profile.name}` : `${project.content_id || 'Project'} • ${project.title || project.hook?.slice(0, 30) || 'Untitled'}`}
         showBack
       />
 
@@ -321,8 +321,8 @@ export default function EditorUploadPage() {
         </div>
       </div>
 
-      {/* Fixed Bottom Button */}
-      <div className="fixed bottom-0 left-0 right-0 px-4 py-4 pb-safe bg-white border-t border-gray-100 max-w-mobile mx-auto">
+      {/* Fixed Bottom Button - positioned above bottom nav */}
+      <div className="fixed bottom-[72px] left-0 right-0 px-4 py-4 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40">
         <Button
           fullWidth
           size="lg"

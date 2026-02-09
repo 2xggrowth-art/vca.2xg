@@ -1,0 +1,50 @@
+language: en-US
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "app-v2/src/services/**"
+      instructions: |
+        Focus on Supabase/PostgREST query correctness, error handling, data validation,
+        and proper use of RLS-aware queries. Check for N+1 query patterns and ensure
+        proper null/empty handling.
+    - path: "app-v2/src/pages/**"
+      instructions: |
+        Focus on React best practices, proper hooks usage (dependency arrays, cleanup),
+        state management patterns, accessibility (ARIA labels, semantic HTML),
+        and mobile-first responsive design.
+    - path: "app-v2/src/components/**"
+      instructions: |
+        Focus on component reusability, proper TypeScript prop types, accessibility,
+        and separation of concerns. Check for proper event handler patterns.
+    - path: "app-v2/src/hooks/**"
+      instructions: |
+        Focus on proper React hook patterns, cleanup functions, dependency arrays,
+        and authentication/authorization flow correctness.
+    - path: "backend/**"
+      instructions: |
+        Focus on security (input validation, authentication, authorization),
+        proper error handling, Authentik OAuth flow correctness, and safe handling
+        of service role keys and secrets.
+    - path: "docker-compose.yml"
+      instructions: |
+        Focus on security (exposed ports, secrets in environment variables),
+        resource limits, health checks, and network isolation.
+    - path: "supabase/migrations/**"
+      instructions: |
+        Focus on SQL correctness, RLS policies, proper indexes, and migration safety
+        (backwards compatibility, data preservation).
+  path_filters:
+    - "!node_modules/**"
+    - "!dist/**"
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+    - "!**/.env*"
+    - "!app-v2/src/test/**"
+  tools:
+    eslint:
+      enabled: true
+chat:
+  auto_reply: true

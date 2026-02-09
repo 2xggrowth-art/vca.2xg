@@ -901,7 +901,7 @@ function mintPostgrestToken(profileId, email, role) {
       app_role: role,
     },
     POSTGREST_JWT_SECRET,
-    { expiresIn: '1h' }
+    { expiresIn: '7d' } // 7 days - like WhatsApp, stays logged in
   );
 }
 

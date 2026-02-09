@@ -51,8 +51,7 @@ export const postingManagerService = {
         assignments:project_assignments(
           id, role,
           user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
+        )
       `)
       .eq('status', 'APPROVED')
       .eq('production_stage', 'READY_TO_POST')
@@ -63,6 +62,26 @@ export const postingManagerService = {
     if (error) throw error;
 
     const projects = (data || []) as any[];
+
+    // Fetch production files separately (PostgREST schema cache missing FK)
+    if (projects.length > 0) {
+      const projectIds = projects.map((p: any) => p.id);
+      const { data: allFiles } = await supabase
+        .from('production_files')
+        .select('*')
+        .in('analysis_id', projectIds);
+
+      const filesByAnalysis = new Map<string, any[]>();
+      for (const file of (allFiles || []) as any[]) {
+        const existing = filesByAnalysis.get(file.analysis_id) || [];
+        existing.push(file);
+        filesByAnalysis.set(file.analysis_id, existing);
+      }
+      for (const project of projects) {
+        project.production_files = filesByAnalysis.get(project.id) || [];
+      }
+    }
+
     return projects.map((project: any) => ({
       ...project,
       email: project.profiles?.email,
@@ -204,25 +223,31 @@ export const postingManagerService = {
    * Get a single project by ID with full details
    */
   async getProjectById(analysisId: string): Promise<ViralAnalysis> {
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        industry:industries(id, name, short_code),
-        profile:profile_list(id, name),
-        profiles:user_id(email, full_name, avatar_url),
-        assignments:project_assignments(
-          id, role,
-          user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
-      `)
-      .eq('id', analysisId)
-      .single();
+    const [projectResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          industry:industries(id, name, short_code),
+          profile:profile_list(id, name),
+          profiles:user_id(email, full_name, avatar_url),
+          assignments:project_assignments(
+            id, role,
+            user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
+          )
+        `)
+        .eq('id', analysisId)
+        .single(),
+      supabase
+        .from('production_files')
+        .select('*')
+        .eq('analysis_id', analysisId)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) throw error;
+    if (projectResult.error) throw projectResult.error;
 
-    const analysis = data as any;
+    const analysis = projectResult.data as any;
     return {
       ...analysis,
       email: analysis.profiles?.email,
@@ -231,6 +256,7 @@ export const postingManagerService = {
       videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
       posting_manager: analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+      production_files: (filesResult.data || []) as any[],
     } as ViralAnalysis;
   },
 

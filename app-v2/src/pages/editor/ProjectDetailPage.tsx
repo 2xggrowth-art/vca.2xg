@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ExternalLink, Play, Pause, FileText, Video, Download, Upload, Clock, Loader2, CheckCircle, Mic, BarChart3, MessageSquare, Music } from 'lucide-react';
+import { ExternalLink, Play, Pause, FileText, Video, Download, Upload, Clock, Loader2, CheckCircle, BarChart3, MessageSquare } from 'lucide-react';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui';
 import { editorService } from '@/services/editorService';
@@ -145,25 +145,6 @@ export default function EditorProjectDetailPage() {
       case 'POSTED': return { label: 'Posted', color: 'bg-emerald-100 text-emerald-700' };
       default: return { label: stage || 'Unknown', color: 'bg-gray-100 text-gray-700' };
     }
-  };
-
-  const getFileTypeLabel = (fileType: string) => {
-    const labels: Record<string, string> = {
-      'RAW_FOOTAGE': 'Raw',
-      'A_ROLL': 'A-Roll',
-      'B_ROLL': 'B-Roll',
-      'HOOK': 'Hook',
-      'BODY': 'Body',
-      'CTA': 'CTA',
-      'AUDIO_CLIP': 'Audio',
-      'OTHER': 'Other',
-      'raw-footage': 'Raw',
-      'EDITED_VIDEO': 'Edited',
-      'FINAL_VIDEO': 'Final',
-      'edited-video': 'Edited',
-      'final-video': 'Final',
-    };
-    return labels[fileType] || fileType;
   };
 
   if (loading) {

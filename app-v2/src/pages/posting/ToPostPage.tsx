@@ -7,7 +7,6 @@ import { videographerService } from '@/services/videographerService';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
-type FilterType = 'all' | 'scheduled' | 'unscheduled';
 type PlatformFilter = 'all' | 'instagram' | 'youtube_shorts' | 'youtube_long';
 
 interface Profile {

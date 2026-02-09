@@ -113,8 +113,8 @@ services:
       - vca-internal
       - coolify
 
-  # ─── Frontend (Nginx serving React build) ────────────────────────────────
-  vca-frontend:
+  # ─── Frontend (Nginx serving React build - OLD SYSTEM) ───────────────────
+  vca-frontend-old:
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -125,19 +125,51 @@ services:
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
         VITE_GOOGLE_API_KEY: ${VITE_GOOGLE_API_KEY}
         VITE_ADMIN_GOOGLE_EMAIL: ${VITE_ADMIN_GOOGLE_EMAIL}
-    container_name: vca-frontend
+    container_name: vca-frontend-old
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.vca-frontend.rule=Host(`vca.2xg.in`)"
-      - "traefik.http.routers.vca-frontend.entrypoints=http,https"
-      - "traefik.http.routers.vca-frontend.tls=true"
-      - "traefik.http.routers.vca-frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.vca-frontend.loadbalancer.server.port=80"
+      - "traefik.http.routers.vca-frontend-old.rule=Host(`vca-old.2xg.in`)"
+      - "traefik.http.routers.vca-frontend-old.entrypoints=http,https"
+      - "traefik.http.routers.vca-frontend-old.tls=true"
+      - "traefik.http.routers.vca-frontend-old.tls.certresolver=letsencrypt"
+      - "traefik.http.services.vca-frontend-old.loadbalancer.server.port=80"
     deploy:
       resources:
         limits:
           memory: 32m
+    networks:
+      - coolify
+
+  # ─── Frontend V2 (Mobile-First React App - NEW PRODUCTION) ───────────────
+  vca-frontend-v2:
+    build:
+      context: ./app-v2
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: https://vca-api.2xg.in
+        VITE_SUPABASE_URL: https://ckfbjsphyasborpnwbyy.supabase.co
+        VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrZmJqc3BoeWFzYm9ycG53Ynl5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NzI4MzAsImV4cCI6MjA4MzM0ODgzMH0.Y3rQfHqDYLqF8eRAqGvfZyOa9fqGTcJG_LqEPYqZ0uA
+        VITE_GOOGLE_CLIENT_ID: 635771661878-3srrbi7vmf0ebgac1c3u6s79ino12lav.apps.googleusercontent.com
+        VITE_GOOGLE_API_KEY: ${VITE_GOOGLE_API_KEY:-your_api_key_here}
+    container_name: vca-frontend-v2
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vca-frontend-v2.rule=Host(`vca.2xg.in`)"
+      - "traefik.http.routers.vca-frontend-v2.entrypoints=http,https"
+      - "traefik.http.routers.vca-frontend-v2.tls=true"
+      - "traefik.http.routers.vca-frontend-v2.tls.certresolver=letsencrypt"
+      - "traefik.http.services.vca-frontend-v2.loadbalancer.server.port=80"
+    deploy:
+      resources:
+        limits:
+          memory: 32m
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
     networks:
       - coolify
 

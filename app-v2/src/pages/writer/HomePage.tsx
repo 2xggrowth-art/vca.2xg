@@ -45,11 +45,6 @@ export default function WriterHomePage() {
     }
   };
 
-  const getRoleBase = () => {
-    const pathParts = location.pathname.split('/');
-    return pathParts[1] || 'writer';
-  };
-
   useEffect(() => {
     loadData();
   }, []);

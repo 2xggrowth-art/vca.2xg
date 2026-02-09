@@ -8,10 +8,13 @@ const voiceNoteService = require('./services/voiceNoteService');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// PostgreSQL connection pool
-const pool = new Pool({
+// PostgreSQL connection pool (only if DATABASE_URL is configured)
+const pool = process.env.DATABASE_URL ? new Pool({
   connectionString: process.env.DATABASE_URL,
-});
+}) : null;
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Middleware - Allow multiple origins for development
 const allowedOrigins = [
@@ -28,13 +31,18 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
+
+    // For development, allow any localhost/192.168.x.x origin
+    if (origin && origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/)) {
+      return callback(null, true);
+    }
+
+    // Check allowed origins
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    // For development, allow any localhost/192.168.x.x origin
-    if (origin.match(/^http:\/\/(localhost|192\.168\.\d+\.\d+)(:\d+)?$/)) {
-      return callback(null, true);
-    }
+
+    console.warn('CORS blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
@@ -107,30 +115,50 @@ app.post('/api/admin/users', verifyAdmin, async (req, res) => {
     });
 
     // Create user + profile in our database
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())',
-        [authentikUser.pk, email]
-      );
-      await client.query(
-        `INSERT INTO profiles (id, email, full_name, role, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW())
-         ON CONFLICT (id) DO UPDATE SET full_name = $3, role = $4, updated_at = NOW()`,
-        [authentikUser.pk, email, fullName, role]
-      );
-      await client.query('COMMIT');
-    } catch (dbError) {
-      await client.query('ROLLBACK');
-      // Try to clean up Authentik user
-      await fetch(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}` },
-      }).catch(() => {});
-      throw dbError;
-    } finally {
-      client.release();
+    if (pool) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())',
+          [authentikUser.pk, email]
+        );
+        await client.query(
+          `INSERT INTO profiles (id, email, full_name, role, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, NOW(), NOW())
+           ON CONFLICT (id) DO UPDATE SET full_name = $3, role = $4, updated_at = NOW()`,
+          [authentikUser.pk, email, fullName, role]
+        );
+        await client.query('COMMIT');
+      } catch (dbError) {
+        await client.query('ROLLBACK');
+        await fetch(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}` },
+        }).catch(() => {});
+        throw dbError;
+      } finally {
+        client.release();
+      }
+    } else if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const headers = {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      };
+      await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates, return=representation' },
+        body: JSON.stringify({
+          id: authentikUser.pk,
+          email: email,
+          full_name: fullName,
+          role: role,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
     }
 
     res.status(201).json({
@@ -176,7 +204,17 @@ app.delete('/api/admin/users/:userId', verifyAdmin, async (req, res) => {
     }
 
     // Delete from database (cascade should handle related records)
-    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    if (pool) {
+      await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    } else if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        },
+      });
+    }
 
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
@@ -204,10 +242,27 @@ app.post('/api/admin/users/:userId/reset-password', verifyAdmin, async (req, res
     }
 
     // Get user's email from database
-    const userResult = await pool.query(
-      'SELECT email FROM profiles WHERE id = $1',
-      [userId]
-    );
+    let userResult;
+    if (pool) {
+      userResult = await pool.query(
+        'SELECT email FROM profiles WHERE id = $1',
+        [userId]
+      );
+    } else if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const profileRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=email`,
+        {
+          headers: {
+            'apikey': SUPABASE_SERVICE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          },
+        }
+      );
+      const rows = profileRes.ok ? await profileRes.json() : [];
+      userResult = { rows };
+    } else {
+      return res.status(500).json({ error: 'No database connection configured' });
+    }
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });

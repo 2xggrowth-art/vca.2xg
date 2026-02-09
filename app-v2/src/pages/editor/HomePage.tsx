@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FolderOpen, Clock, CheckCircle, Plus, Scissors, Loader2, Sparkles, User, BarChart3, Settings, LogOut } from 'lucide-react';
+import { FolderOpen, Clock, CheckCircle, Scissors, Loader2, Sparkles, User, BarChart3, Settings, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { editorService, type EditorStats } from '@/services/editorService';
 import { useAuth } from '@/hooks/useAuth';

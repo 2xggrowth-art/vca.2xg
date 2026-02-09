@@ -6,7 +6,6 @@ import {
   EyeOff,
   Key,
   LogOut,
-  User,
   Check,
   Bell,
   Moon,

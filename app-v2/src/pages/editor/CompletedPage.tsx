@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Header from '@/components/Header';
-import { CheckCircle, Video, Loader2, Eye, Star, Trophy, Award } from 'lucide-react';
+import { CheckCircle, Loader2, Eye, Star, Trophy, Award } from 'lucide-react';
 import { editorService } from '@/services/editorService';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
@@ -61,10 +61,6 @@ export default function EditorCompletedPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const getFileCount = (project: ViralAnalysis) => {
-    return project.production_files?.filter((f: any) => !f.is_deleted).length || 0;
   };
 
   const formatDate = (dateString: string) => {
@@ -156,7 +152,6 @@ export default function EditorCompletedPage() {
         {filteredProjects.length > 0 ? (
           <div className="space-y-3">
             {filteredProjects.map((project, index) => {
-              const stageInfo = getStageLabel(project.production_stage);
               const perfData = getPerformanceData(project);
               return (
                 <Link

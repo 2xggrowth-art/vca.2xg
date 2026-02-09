@@ -72,11 +72,20 @@ export const videographerService = {
       return isInPlanningStage;
     });
 
-    // Get rejected projects from localStorage
-    const rejectedIds = this.getRejectedProjectIds();
+    // Get skipped projects from database
+    const { data: { user } } = await auth.getUser();
+    let skippedIds = new Set<string>();
+    if (user) {
+      const { data: skips } = await supabase
+        .from('project_skips')
+        .select('analysis_id')
+        .eq('user_id', user.id)
+        .eq('role', 'VIDEOGRAPHER');
+      skippedIds = new Set(Array.isArray(skips) ? skips.map((s: any) => s.analysis_id) : []);
+    }
 
     return availableProjects
-      .filter((p: any) => !rejectedIds.includes(p.id))
+      .filter((p: any) => !skippedIds.has(p.id))
       .map((project: any) => ({
         ...project,
         email: project.profiles?.email,
@@ -105,27 +114,41 @@ export const videographerService = {
 
     const analysisIds = assignmentsList.map((a) => a.analysis_id);
 
-    // Fetch the full projects
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        industry:industries(id, name, short_code),
-        profile:profile_list(id, name),
-        profiles:user_id(email, full_name, avatar_url),
-        assignments:project_assignments(
-          id, role,
-          user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
-      `)
-      .in('id', analysisIds)
-      .order('priority', { ascending: false })
-      .order('created_at', { ascending: false });
+    // Fetch projects and production files in parallel
+    // (PostgREST embedded query production_files(*) returns undefined — schema cache missing FK)
+    const [projectsResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          industry:industries(id, name, short_code),
+          profile:profile_list(id, name),
+          profiles:user_id(email, full_name, avatar_url),
+          assignments:project_assignments(
+            id, role,
+            user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
+          )
+        `)
+        .in('id', analysisIds)
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('production_files')
+        .select('*')
+        .in('analysis_id', analysisIds),
+    ]);
 
-    if (error) throw error;
+    if (projectsResult.error) throw projectsResult.error;
 
-    const projectList = (data || []) as any[];
+    // Group files by analysis_id
+    const filesByAnalysis = new Map<string, any[]>();
+    for (const file of (filesResult.data || []) as any[]) {
+      const existing = filesByAnalysis.get(file.analysis_id) || [];
+      existing.push(file);
+      filesByAnalysis.set(file.analysis_id, existing);
+    }
+
+    const projectList = (projectsResult.data || []) as any[];
     return projectList.map((project: any) => ({
       ...project,
       email: project.profiles?.email,
@@ -133,6 +156,7 @@ export const videographerService = {
       avatar_url: project.profiles?.avatar_url,
       videographer: project.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: project.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
+      production_files: filesByAnalysis.get(project.id) || [],
     })) as ViralAnalysis[];
   },
 
@@ -204,25 +228,33 @@ export const videographerService = {
    * Get a single project by ID with full details
    */
   async getProjectById(analysisId: string): Promise<ViralAnalysis> {
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        industry:industries(id, name, short_code),
-        profile:profile_list(id, name),
-        profiles:user_id(email, full_name, avatar_url),
-        assignments:project_assignments(
-          id, role,
-          user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
-        ),
-        production_files(*)
-      `)
-      .eq('id', analysisId)
-      .single();
+    // Fetch project and production files in parallel
+    // (PostgREST embedded query production_files(*) returns undefined — schema cache missing FK)
+    const [projectResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          industry:industries(id, name, short_code),
+          profile:profile_list(id, name),
+          profiles:user_id(email, full_name, avatar_url),
+          assignments:project_assignments(
+            id, role,
+            user:profiles!project_assignments_user_id_fkey(id, email, full_name, avatar_url)
+          )
+        `)
+        .eq('id', analysisId)
+        .single(),
+      supabase
+        .from('production_files')
+        .select('*')
+        .eq('analysis_id', analysisId)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) throw error;
+    if (projectResult.error) throw projectResult.error;
 
-    const analysis = data as any;
+    const analysis = projectResult.data as any;
     return {
       ...analysis,
       email: analysis.profiles?.email,
@@ -231,6 +263,7 @@ export const videographerService = {
       videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
       editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
       posting_manager: analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user,
+      production_files: (filesResult.data || []) as any[],
     } as ViralAnalysis;
   },
 
@@ -301,7 +334,7 @@ export const videographerService = {
 
     if (updateError) throw updateError;
 
-    // Assign videographer
+    // Assign videographer — rollback stage on failure
     const { error: assignmentError } = await supabase
       .from('project_assignments')
       .insert({
@@ -311,7 +344,18 @@ export const videographerService = {
         assigned_by: user.id,
       });
 
-    if (assignmentError) throw assignmentError;
+    if (assignmentError) {
+      // Rollback: revert production_stage and clear started_at
+      const rollbackData: Record<string, unknown> = {
+        production_stage: projectData.production_stage || 'PLANNING',
+        production_started_at: null,
+      };
+      if (data.profileId) rollbackData.profile_id = projectData.profile_id || null;
+      await supabase.from('viral_analyses')
+        .update(rollbackData)
+        .eq('id', data.analysisId);
+      throw assignmentError;
+    }
 
     return this.getProjectById(data.analysisId);
   },
@@ -409,27 +453,29 @@ export const videographerService = {
   },
 
   /**
-   * Reject a project - hides it from available list (stored in localStorage)
+   * Skip a project - persisted to database so it syncs across devices
    */
-  getRejectedProjectIds(): string[] {
-    try {
-      const raw = localStorage.getItem('videographer_rejected_projects');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+  async rejectProject(analysisId: string): Promise<void> {
+    const { data: { user } } = await auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from('project_skips')
+      .upsert({
+        analysis_id: analysisId,
+        user_id: user.id,
+        role: 'VIDEOGRAPHER',
+      }, { onConflict: 'analysis_id,user_id' });
   },
 
-  rejectProject(analysisId: string): void {
-    const rejected = this.getRejectedProjectIds();
-    if (!rejected.includes(analysisId)) {
-      rejected.push(analysisId);
-      localStorage.setItem('videographer_rejected_projects', JSON.stringify(rejected));
-    }
-  },
+  async unrejectProject(analysisId: string): Promise<void> {
+    const { data: { user } } = await auth.getUser();
+    if (!user) return;
 
-  unrejectProject(analysisId: string): void {
-    const rejected = this.getRejectedProjectIds().filter(id => id !== analysisId);
-    localStorage.setItem('videographer_rejected_projects', JSON.stringify(rejected));
+    await supabase
+      .from('project_skips')
+      .delete()
+      .eq('analysis_id', analysisId)
+      .eq('user_id', user.id);
   },
 };

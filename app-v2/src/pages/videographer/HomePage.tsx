@@ -97,7 +97,7 @@ export default function VideographerHomePage() {
   };
 
   // Get user's first name for greeting
-  const firstName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
+  const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
 
   // Active shoots = SHOOTING stage
   const activeShoots = myProjects.filter((p) => p.production_stage === 'SHOOTING');

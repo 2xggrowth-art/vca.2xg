@@ -27,15 +27,18 @@ export default function LoginPage() {
     try {
       const { error } = await signIn(email, password);
       if (error) {
-        setError(error);
-        toast.error(error);
+        // Handle error - could be string or object
+        const errorMsg = typeof error === 'string' ? error : (error as any)?.message || 'Login failed';
+        setError(errorMsg);
+        toast.error(errorMsg);
       } else {
         toast.success('Welcome back!');
         navigate('/');
       }
-    } catch {
-      setError('An unexpected error occurred');
-      toast.error('Login failed');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsLoading(false);
     }
@@ -57,9 +60,10 @@ export default function LoginPage() {
         <h2 className="text-xl font-bold text-gray-900 mb-1">Welcome Back</h2>
         <p className="text-gray-500 text-sm mb-8">Sign in to continue</p>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5" autoComplete="on">
           <Input
             type="email"
+            name="email"
             label="Email"
             placeholder="Enter your email"
             value={email}
@@ -71,6 +75,7 @@ export default function LoginPage() {
           <div className="relative">
             <Input
               type={showPassword ? 'text' : 'password'}
+              name="password"
               label="Password"
               placeholder="Enter your password"
               value={password}

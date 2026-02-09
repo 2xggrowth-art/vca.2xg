@@ -240,27 +240,21 @@ export const productionFilesService = {
     finalVideo: number;
     total: number;
   }> {
-    const { data, error } = await supabase
-      .from('production_files')
-      .select('file_type')
-      .eq('analysis_id', analysisId);
+    // Use server-side count queries instead of fetching all records
+    const base = () => supabase.from('production_files').select('id', { count: 'exact', head: true }).eq('analysis_id', analysisId);
 
-    if (error) throw error;
+    const [totalResult, rawResult, editedResult, finalResult] = await Promise.all([
+      base(),
+      base().eq('file_type', 'raw-footage'),
+      base().eq('file_type', 'edited-video'),
+      base().eq('file_type', 'final-video'),
+    ]);
 
-    const files = (data || []) as { file_type: string }[];
-    const counts = {
-      rawFootage: 0,
-      editedVideo: 0,
-      finalVideo: 0,
-      total: files.length,
+    return {
+      rawFootage: rawResult.count || 0,
+      editedVideo: editedResult.count || 0,
+      finalVideo: finalResult.count || 0,
+      total: totalResult.count || 0,
     };
-
-    for (const file of files) {
-      if (file.file_type === 'raw-footage') counts.rawFootage++;
-      else if (file.file_type === 'edited-video') counts.editedVideo++;
-      else if (file.file_type === 'final-video') counts.finalVideo++;
-    }
-
-    return counts;
   },
 };

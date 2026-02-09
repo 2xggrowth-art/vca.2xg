@@ -17,10 +17,21 @@ import {
   Mic,
   FileVideo,
   Download,
+  RotateCcw,
+  SkipForward,
 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
+
+interface SkipEntry {
+  id: string;
+  user_id: string;
+  role: string;
+  skipped_at: string;
+  full_name?: string;
+  email?: string;
+}
 
 type TabType = 'details' | 'files' | 'team';
 
@@ -41,9 +52,14 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('details');
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [skips, setSkips] = useState<SkipEntry[]>([]);
+  const [removingSkip, setRemovingSkip] = useState<string | null>(null);
 
   useEffect(() => {
-    if (id) loadProject();
+    if (id) {
+      loadProject();
+      loadSkips();
+    }
   }, [id]);
 
   useEffect(() => {
@@ -66,6 +82,28 @@ export default function ProjectDetailPage() {
       navigate('/admin/production');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSkips = async () => {
+    try {
+      const data = await adminService.getProjectSkips(id!);
+      setSkips(data);
+    } catch {
+      // Silently fail — table may not exist yet
+    }
+  };
+
+  const handleRemoveSkip = async (skipId: string) => {
+    try {
+      setRemovingSkip(skipId);
+      await adminService.removeSkip(skipId);
+      setSkips((prev) => prev.filter((s) => s.id !== skipId));
+      toast.success('Project restored to available list');
+    } catch {
+      toast.error('Failed to remove skip');
+    } finally {
+      setRemovingSkip(null);
     }
   };
 
@@ -549,6 +587,42 @@ export default function ProjectDetailPage() {
               <p className="text-sm text-gray-400">Not assigned</p>
             )}
           </div>
+
+          {/* Skipped By */}
+          {skips.length > 0 && (
+            <div className="bg-white border border-red-100 rounded-xl p-4">
+              <h3 className="text-sm font-medium text-red-600 mb-3 flex items-center gap-2">
+                <SkipForward className="w-4 h-4" />
+                Skipped By ({skips.length})
+              </h3>
+              <div className="space-y-2">
+                {skips.map((skip) => (
+                  <div key={skip.id} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {skip.full_name || skip.email || 'Unknown'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {skip.role} &middot; {new Date(skip.skipped_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveSkip(skip.id)}
+                      disabled={removingSkip === skip.id}
+                      className="ml-2 px-2.5 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {removingSkip === skip.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3 h-3" />
+                      )}
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 
