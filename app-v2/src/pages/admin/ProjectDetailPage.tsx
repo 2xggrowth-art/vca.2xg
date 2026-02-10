@@ -422,49 +422,114 @@ export default function ProjectDetailPage() {
           animate={{ opacity: 1 }}
           className="space-y-4"
         >
-          {/* Raw Footage */}
-          <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-              <Video className="w-4 h-4" />
-              Raw Footage
-            </h3>
-            {(project as any).raw_file_url || (project as any).raw_footage_drive_url ? (
-              <a
-                href={(project as any).raw_file_url || (project as any).raw_footage_drive_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
-              >
-                <FileVideo className="w-4 h-4" />
-                <span className="flex-1">View Raw Footage</span>
-                <Download className="w-4 h-4" />
-              </a>
-            ) : (
-              <p className="text-sm text-gray-400">No raw footage uploaded yet</p>
-            )}
-          </div>
+          {/* Production Files from DB */}
+          {(() => {
+            const files = (project as any).production_files || [];
+            const rawFiles = files.filter((f: any) =>
+              ['A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP', 'RAW_FOOTAGE', 'raw-footage'].includes(f.file_type)
+            );
+            const editedFiles = files.filter((f: any) =>
+              ['edited-video', 'EDITED_VIDEO'].includes(f.file_type)
+            );
+            const finalFiles = files.filter((f: any) =>
+              ['final-video', 'FINAL_VIDEO'].includes(f.file_type)
+            );
 
-          {/* Edited Video */}
-          <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-              <Scissors className="w-4 h-4" />
-              Edited Video
-            </h3>
-            {(project as any).edited_file_url || (project as any).edited_video_drive_url ? (
-              <a
-                href={(project as any).edited_file_url || (project as any).edited_video_drive_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
-              >
-                <FileVideo className="w-4 h-4" />
-                <span className="flex-1">View Edited Video</span>
-                <Download className="w-4 h-4" />
-              </a>
-            ) : (
-              <p className="text-sm text-gray-400">No edited video uploaded yet</p>
-            )}
-          </div>
+            const renderFileList = (fileList: any[]) => {
+              if (fileList.length === 0) {
+                // Fallback to legacy URL columns
+                return null;
+              }
+              return (
+                <div className="space-y-2">
+                  {fileList.map((file: any) => (
+                    <a
+                      key={file.id}
+                      href={file.drive_view_link || file.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
+                    >
+                      <FileVideo className="w-4 h-4" />
+                      <span className="flex-1 truncate">{file.file_name || file.file_type}</span>
+                      <span className="text-xs text-gray-400 shrink-0">{file.file_type}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              );
+            };
+
+            return (
+              <>
+                {/* Raw Footage */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <Video className="w-4 h-4" />
+                    Raw Footage
+                    {rawFiles.length > 0 && (
+                      <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">{rawFiles.length}</span>
+                    )}
+                  </h3>
+                  {renderFileList(rawFiles) || (
+                    (project as any).raw_file_url || (project as any).raw_footage_drive_url ? (
+                      <a
+                        href={(project as any).raw_file_url || (project as any).raw_footage_drive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
+                      >
+                        <FileVideo className="w-4 h-4" />
+                        <span className="flex-1">View Raw Footage</span>
+                        <Download className="w-4 h-4" />
+                      </a>
+                    ) : (
+                      <p className="text-sm text-gray-400">No raw footage uploaded yet</p>
+                    )
+                  )}
+                </div>
+
+                {/* Edited Video */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <Scissors className="w-4 h-4" />
+                    Edited Video
+                    {editedFiles.length > 0 && (
+                      <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">{editedFiles.length}</span>
+                    )}
+                  </h3>
+                  {renderFileList(editedFiles) || (
+                    (project as any).edited_file_url || (project as any).edited_video_drive_url ? (
+                      <a
+                        href={(project as any).edited_file_url || (project as any).edited_video_drive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
+                      >
+                        <FileVideo className="w-4 h-4" />
+                        <span className="flex-1">View Edited Video</span>
+                        <Download className="w-4 h-4" />
+                      </a>
+                    ) : (
+                      <p className="text-sm text-gray-400">No edited video uploaded yet</p>
+                    )
+                  )}
+                </div>
+
+                {/* Final Video */}
+                {finalFiles.length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                      <Send className="w-4 h-4" />
+                      Final Video
+                      <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">{finalFiles.length}</span>
+                    </h3>
+                    {renderFileList(finalFiles)}
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Feedback Voice Note */}
           {project.feedback_voice_note_url && (

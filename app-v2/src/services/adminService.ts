@@ -133,35 +133,43 @@ export const adminService = {
    * Get single analysis by ID
    */
   async getAnalysis(id: string): Promise<ViralAnalysis> {
-    const { data, error } = await supabase
-      .from('viral_analyses')
-      .select(`
-        *,
-        profiles:user_id (
-          email,
-          full_name,
-          avatar_url
-        ),
-        industry:industries (id, name, short_code),
-        profile:profile_list (id, name),
-        assignments:project_assignments (
-          id,
-          role,
-          user:profiles!project_assignments_user_id_fkey (
-            id,
+    // Fetch project and production files in parallel
+    const [projectResult, filesResult] = await Promise.all([
+      supabase
+        .from('viral_analyses')
+        .select(`
+          *,
+          profiles:user_id (
             email,
             full_name,
-            avatar_url,
-            role
+            avatar_url
+          ),
+          industry:industries (id, name, short_code),
+          profile:profile_list (id, name),
+          assignments:project_assignments (
+            id,
+            role,
+            user:profiles!project_assignments_user_id_fkey (
+              id,
+              email,
+              full_name,
+              avatar_url,
+              role
+            )
           )
-        )
-      `)
-      .eq('id', id)
-      .single();
+        `)
+        .eq('id', id)
+        .single(),
+      supabase
+        .from('production_files')
+        .select('*')
+        .eq('analysis_id', id)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) throw error;
+    if (projectResult.error) throw projectResult.error;
 
-    const analysis = data as any;
+    const analysis = projectResult.data as any;
     const videographer = analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user;
     const editor = analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user;
     const posting_manager = analysis.assignments?.find((a: any) => a.role === 'POSTING_MANAGER')?.user;
@@ -174,6 +182,7 @@ export const adminService = {
       videographer,
       editor,
       posting_manager,
+      production_files: (filesResult.data || []) as any[],
     } as ViralAnalysis;
   },
 
