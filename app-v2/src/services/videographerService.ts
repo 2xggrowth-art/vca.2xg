@@ -367,20 +367,8 @@ export const videographerService = {
     const { data: { user } } = await auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
-    // Verify files exist
-    const rawFileTypes = ['RAW_FOOTAGE', 'A_ROLL', 'B_ROLL', 'HOOK', 'BODY', 'CTA', 'AUDIO_CLIP', 'OTHER', 'raw-footage'];
-
-    const { count: fileCount, error: countError } = await supabase
-      .from('production_files')
-      .select('id', { count: 'exact', head: true })
-      .eq('analysis_id', analysisId)
-      .in('file_type', rawFileTypes)
-      .eq('is_deleted', false);
-
-    if (countError) throw new Error('Failed to verify files');
-    if (!fileCount || fileCount === 0) {
-      throw new Error('Please upload at least one file before marking as complete');
-    }
+    // File verification is done by the UI before calling this method
+    // (UploadPage checks existingFiles.length > 0)
 
     // Update the analysis
     const updateData: Record<string, unknown> = {

@@ -655,10 +655,31 @@ export default function UploadPage() {
             </div>
           </div>
         )}
+
+        {/* Production Notes (optional) - in scrollable area */}
+        {isSignedIn && existingFiles.length > 0 && (
+          <div className="mb-6">
+            <label htmlFor="production-notes" className="block text-sm font-medium text-gray-700 mb-2">
+              Production Notes <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="production-notes"
+              placeholder="Add any notes for the editor (e.g., special shots, lighting info, challenges faced, preferred takes...)"
+              value={productionNotes}
+              onChange={(e) => setProductionNotes(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+              aria-label="Production notes for editor"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              These notes will help the editor understand your footage and creative decisions
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Fixed Bottom Buttons - positioned above bottom nav + FAB */}
-      <div className="fixed bottom-[100px] left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40">
+      {/* Fixed Bottom Buttons - positioned above bottom nav */}
+      <div className="fixed bottom-[68px] left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40">
         <div className="flex flex-col gap-2">
           {isUploading ? (
             <Button fullWidth size="lg" variant="outline" onClick={cancelUpload}>
@@ -690,28 +711,7 @@ export default function UploadPage() {
                 </Button>
               )}
 
-              {/* Production Notes (optional) */}
-              {isSignedIn && existingFiles.length > 0 && (
-                <div className="space-y-2">
-                  <label htmlFor="production-notes" className="block text-sm font-medium text-gray-700">
-                    Production Notes <span className="text-gray-400 font-normal">(optional)</span>
-                  </label>
-                  <textarea
-                    id="production-notes"
-                    placeholder="Add any notes for the editor (e.g., special shots, lighting info, challenges faced, preferred takes...)"
-                    value={productionNotes}
-                    onChange={(e) => setProductionNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
-                    aria-label="Production notes for editor"
-                  />
-                  <p className="text-xs text-gray-500">
-                    These notes will help the editor understand your footage and creative decisions
-                  </p>
-                </div>
-              )}
-
-              {/* Mark Complete button - always visible when signed in */}
+              {/* Mark Complete button */}
               <Button
                 fullWidth
                 size="lg"
@@ -722,13 +722,6 @@ export default function UploadPage() {
                 <CheckCircle className="w-5 h-5" />
                 Mark Shoot Complete
               </Button>
-
-              {/* Warning when no files uploaded yet */}
-              {existingFiles.length === 0 && (
-                <p className="text-xs text-center text-amber-500">
-                  Upload at least one file to mark as complete
-                </p>
-              )}
 
               {/* Save & Continue Later */}
               <button
