@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Plus, RefreshCw, Pencil, Trash2, X, Mail, User as UserIcon } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import ResetPasswordModal from '@/components/admin/ResetPasswordModal';
+import ResetPinModal from '@/components/admin/ResetPinModal';
 import toast from 'react-hot-toast';
 
 interface TeamMember {
@@ -49,7 +49,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filterRole, setFilterRole] = useState<string>('all');
-  const [resetPasswordModal, setResetPasswordModal] = useState<{
+  const [resetPinModal, setResetPinModal] = useState<{
     isOpen: boolean;
     user: TeamMember | null;
   }>({ isOpen: false, user: null });
@@ -384,9 +384,9 @@ export default function TeamPage() {
                     {/* Actions */}
                     <div className="flex gap-1.5">
                       <button
-                        onClick={() => setResetPasswordModal({ isOpen: true, user: member })}
+                        onClick={() => setResetPinModal({ isOpen: true, user: member })}
                         className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
-                        title="Reset Password"
+                        title="Reset PIN"
                       >
                         <Pencil className="w-4 h-4 text-gray-500" />
                       </button>
@@ -588,13 +588,13 @@ export default function TeamPage() {
         )}
       </AnimatePresence>
 
-      {/* Reset Password Modal */}
-      <ResetPasswordModal
-        isOpen={resetPasswordModal.isOpen}
-        user={resetPasswordModal.user}
-        onClose={() => setResetPasswordModal({ isOpen: false, user: null })}
+      {/* Reset PIN Modal */}
+      <ResetPinModal
+        isOpen={resetPinModal.isOpen}
+        user={resetPinModal.user}
+        onClose={() => setResetPinModal({ isOpen: false, user: null })}
         onSuccess={() => {
-          toast.success('Password reset successfully');
+          toast.success('PIN reset successfully');
         }}
       />
     </div>

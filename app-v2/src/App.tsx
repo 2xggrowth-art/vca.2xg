@@ -49,8 +49,6 @@ const WriterScriptDetail = lazy(() => import('@/pages/writer/ScriptDetailPage'))
 
 // Shared pages
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
-const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
-const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -96,8 +94,6 @@ export default function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           {/* Protected routes */}
           <Route

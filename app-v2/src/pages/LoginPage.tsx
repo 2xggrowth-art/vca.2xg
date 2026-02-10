@@ -1,131 +1,339 @@
-import { useState, FormEvent } from 'react';
+import { useState, useRef, type FormEvent } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Eye, EyeOff } from 'lucide-react';
-import { Button, Input } from '@/components/ui';
+import { Mail } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import toast from 'react-hot-toast';
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+type LoginMode = 'choose' | 'pin-login' | 'pin-setup';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { signIn, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { signInWithSession, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [mode, setMode] = useState<LoginMode>('choose');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [pin, setPin] = useState(['', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [tempToken, setTempToken] = useState('');
+  const [userName, setUserName] = useState('');
+  const pinRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // If already authenticated, redirect to role-based home
   if (!authLoading && isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
-  const handleSubmit = async (e: FormEvent) => {
+  const resetPin = () => {
+    setPin(['', '', '', '']);
+    setTimeout(() => pinRefs.current[0]?.focus(), 50);
+  };
+
+  const handlePinChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+
+    const newPin = [...pin];
+    newPin[index] = value.slice(-1);
+    setPin(newPin);
+
+    if (value && index < 3) {
+      pinRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handlePinKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !pin[index] && index > 0) {
+      pinRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handlePinPaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    setError('');
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    if (pasted.length === 4) {
+      setPin(pasted.split(''));
+      pinRefs.current[3]?.focus();
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse: { credential?: string }) => {
+    if (!credentialResponse.credential) {
+      toast.error('Google sign-in failed');
+      return;
+    }
+
     setIsLoading(true);
+    setError('');
 
     try {
-      const { error } = await signIn(email, password);
-      if (error) {
-        // Handle error - could be string or object
-        const errorMsg = typeof error === 'string' ? error : (error as any)?.message || 'Login failed';
-        setError(errorMsg);
-        toast.error(errorMsg);
-      } else {
+      const res = await fetch(`${BACKEND_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: credentialResponse.credential }),
+      });
+
+      const body = await res.json();
+
+      if (!res.ok) {
+        setError(body.error || 'Google sign-in failed');
+        toast.error(body.error || 'Google sign-in failed');
+        return;
+      }
+
+      if (body.needsPin) {
+        setTempToken(body.tempToken);
+        setUserName(body.user.full_name || body.user.email);
+        setEmail(body.user.email);
+        setMode('pin-setup');
+        resetPin();
+        return;
+      }
+
+      if (body.session) {
+        signInWithSession(body.session);
         toast.success('Welcome back!');
         navigate('/');
       }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setError(errorMsg);
-      toast.error(errorMsg);
+    } catch {
+      toast.error('Failed to connect to server');
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleSetPin = async (e: FormEvent) => {
+    e.preventDefault();
+    const pinValue = pin.join('');
+    if (pinValue.length !== 4) {
+      setError('Please enter a 4-digit PIN');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/set-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinValue, tempToken }),
+      });
+
+      const body = await res.json();
+
+      if (!res.ok) {
+        setError(body.error || 'Failed to set PIN');
+        toast.error(body.error || 'Failed to set PIN');
+        return;
+      }
+
+      if (body.session) {
+        signInWithSession(body.session);
+        toast.success('PIN set! Welcome!');
+        navigate('/');
+      }
+    } catch {
+      toast.error('Failed to connect to server');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePinLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    const pinValue = pin.join('');
+    if (pinValue.length !== 4 || !email) {
+      setError('Please enter your email and 4-digit PIN');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/pin-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, pin: pinValue }),
+      });
+
+      const body = await res.json();
+
+      if (!res.ok) {
+        setError(body.error || 'Invalid email or PIN');
+        toast.error(body.error || 'Invalid email or PIN');
+        resetPin();
+        return;
+      }
+
+      if (body.session) {
+        signInWithSession(body.session);
+        toast.success('Welcome back!');
+        navigate('/');
+      }
+    } catch {
+      toast.error('Failed to connect to server');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const PinInput = () => (
+    <div className="flex gap-3 justify-center" onPaste={handlePinPaste}>
+      {pin.map((digit, i) => (
+        <input
+          key={i}
+          ref={el => { pinRefs.current[i] = el; }}
+          type="tel"
+          inputMode="numeric"
+          maxLength={1}
+          value={digit}
+          onChange={(e) => handlePinChange(i, e.target.value)}
+          onKeyDown={(e) => handlePinKeyDown(i, e)}
+          className="w-14 h-14 text-center text-2xl font-bold border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+          autoComplete="off"
+        />
+      ))}
+    </div>
+  );
+
   return (
-    <div className="app-container">
-      {/* Header with gradient */}
-      <div className="bg-gradient-primary px-6 pt-16 pb-12 text-white text-center">
-        <div className="w-20 h-20 mx-auto mb-4 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-          <span className="text-4xl font-bold">V</span>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <div className="app-container">
+        {/* Header */}
+        <div className="bg-gradient-primary px-6 pt-16 pb-12 text-white text-center">
+          <div className="w-20 h-20 mx-auto mb-4 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+            <span className="text-4xl font-bold">V</span>
+          </div>
+          <h1 className="text-2xl font-bold mb-1">VCA</h1>
+          <p className="text-white/80 text-sm">Viral Content Analyzer</p>
         </div>
-        <h1 className="text-2xl font-bold mb-1">VCA</h1>
-        <p className="text-white/80 text-sm">Viral Content Analyzer</p>
-      </div>
 
-      {/* Login Form */}
-      <div className="flex-1 px-6 py-8 -mt-6 bg-white rounded-t-3xl">
-        <h2 className="text-xl font-bold text-gray-900 mb-1">Welcome Back</h2>
-        <p className="text-gray-500 text-sm mb-8">Sign in to continue</p>
+        {/* Content */}
+        <div className="flex-1 px-6 py-8 -mt-6 bg-white rounded-t-3xl">
+          {mode === 'choose' && (
+            <>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">Welcome</h2>
+              <p className="text-gray-500 text-sm mb-8">Sign in to continue</p>
 
-        <form onSubmit={handleSubmit} className="space-y-5" autoComplete="on">
-          <Input
-            type="email"
-            name="email"
-            label="Email"
-            placeholder="Enter your email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
+              {/* Google Sign-In */}
+              <div className="flex justify-center mb-6">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => toast.error('Google sign-in failed')}
+                  size="large"
+                  width="320"
+                  text="signin_with"
+                  shape="rectangular"
+                  theme="outline"
+                />
+              </div>
 
-          <div className="relative">
-            <Input
-              type={showPassword ? 'text' : 'password'}
-              name="password"
-              label="Password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
-            <button
-              type="button"
-              className="absolute right-4 top-[38px] text-gray-400"
-              onClick={() => setShowPassword(!showPassword)}
-            >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
+              {/* Divider */}
+              <div className="flex items-center gap-4 my-6">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-sm text-gray-400">or</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
 
-          <div className="flex justify-end -mt-2">
-            <button
-              type="button"
-              onClick={() => navigate('/forgot-password')}
-              className="text-sm text-primary font-medium hover:underline"
-            >
-              Forgot password?
-            </button>
-          </div>
+              {/* PIN Login Button */}
+              <Button
+                fullWidth
+                variant="outline"
+                size="lg"
+                onClick={() => { setMode('pin-login'); resetPin(); }}
+              >
+                <Mail className="w-5 h-5 mr-2" />
+                Sign in with Email & PIN
+              </Button>
 
-          {error && (
-            <div className="p-3 bg-danger/10 border border-danger/20 rounded-xl text-sm text-danger">
-              {error}
-            </div>
+              {error && (
+                <div className="mt-4 p-3 bg-danger/10 border border-danger/20 rounded-xl text-sm text-danger">
+                  {error}
+                </div>
+              )}
+
+              <p className="text-center text-gray-400 text-xs mt-8">
+                Contact admin if you need access
+              </p>
+            </>
           )}
 
-          <Button
-            type="submit"
-            fullWidth
-            size="lg"
-            isLoading={isLoading}
-          >
-            Sign In
-          </Button>
-        </form>
+          {mode === 'pin-login' && (
+            <>
+              <button
+                onClick={() => { setMode('choose'); setError(''); }}
+                className="text-sm text-primary font-medium mb-4"
+              >
+                &larr; Back
+              </button>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">Sign in with PIN</h2>
+              <p className="text-gray-500 text-sm mb-6">Enter your email and 4-digit PIN</p>
 
-        {/* Help text */}
-        <p className="text-center text-gray-400 text-xs mt-8">
-          Contact admin if you need access
-        </p>
+              <form onSubmit={handlePinLogin} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">PIN</label>
+                  <PinInput />
+                </div>
+
+                {error && (
+                  <div className="p-3 bg-danger/10 border border-danger/20 rounded-xl text-sm text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <Button type="submit" fullWidth size="lg" isLoading={isLoading}>
+                  Sign In
+                </Button>
+              </form>
+            </>
+          )}
+
+          {mode === 'pin-setup' && (
+            <>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">Set Your PIN</h2>
+              <p className="text-gray-500 text-sm mb-2">
+                Hi {userName}! Create a 4-digit PIN for quick login.
+              </p>
+              <p className="text-gray-400 text-xs mb-6">
+                Use this PIN to sign in from any device with just your email.
+              </p>
+
+              <form onSubmit={handleSetPin} className="space-y-5">
+                <PinInput />
+
+                {error && (
+                  <div className="p-3 bg-danger/10 border border-danger/20 rounded-xl text-sm text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <Button type="submit" fullWidth size="lg" isLoading={isLoading}>
+                  Set PIN & Continue
+                </Button>
+              </form>
+            </>
+          )}
+        </div>
+
+        <div className="h-safe-bottom bg-white" />
       </div>
-
-      {/* Bottom safe area */}
-      <div className="h-safe-bottom bg-white" />
-    </div>
+    </GoogleOAuthProvider>
   );
 }

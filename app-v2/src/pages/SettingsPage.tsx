@@ -1,9 +1,7 @@
-import { useState, FormEvent, useEffect } from 'react';
+import { useState, type FormEvent, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Eye,
-  EyeOff,
   Key,
   LogOut,
   Check,
@@ -17,7 +15,7 @@ import {
   Save,
 } from 'lucide-react';
 import Header from '@/components/Header';
-import { Button, Input } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { auth } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -30,16 +28,14 @@ export default function SettingsPage() {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editName, setEditName] = useState('');
 
-  // Password state
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  // PIN state
+  const [currentPin, setCurrentPin] = useState(['', '', '', '']);
+  const [newPin, setNewPin] = useState(['', '', '', '']);
+  const [isChangingPin, setIsChangingPin] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const currentPinRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const newPinRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Notification preferences
   const [notifications, setNotifications] = useState({
@@ -58,45 +54,64 @@ export default function SettingsPage() {
     setEditName(name);
   }, [user]);
 
-  const handleChangePassword = async (e: FormEvent) => {
+  const handlePinInput = (
+    pins: string[],
+    setPins: React.Dispatch<React.SetStateAction<string[]>>,
+    refs: React.RefObject<(HTMLInputElement | null)[]>,
+    index: number,
+    value: string
+  ) => {
+    if (!/^\d*$/.test(value)) return;
+    const newPins = [...pins];
+    newPins[index] = value.slice(-1);
+    setPins(newPins);
+    if (value && index < 3 && refs.current) {
+      refs.current[index + 1]?.focus();
+    }
+  };
+
+  const handlePinKeyDown = (
+    pins: string[],
+    refs: React.RefObject<(HTMLInputElement | null)[]>,
+    index: number,
+    e: React.KeyboardEvent
+  ) => {
+    if (e.key === 'Backspace' && !pins[index] && index > 0 && refs.current) {
+      refs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleChangePin = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess(false);
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setError('All fields are required');
+    const currentPinValue = currentPin.join('');
+    const newPinValue = newPin.join('');
+
+    if (currentPinValue.length !== 4 || newPinValue.length !== 4) {
+      setError('Both PINs must be 4 digits');
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError('New password must be at least 8 characters');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError('New passwords do not match');
-      return;
-    }
-
-    setIsChangingPassword(true);
+    setIsChangingPin(true);
 
     try {
-      const { error } = await auth.changePassword({ currentPassword, newPassword });
+      const { error } = await auth.changePin({ currentPin: currentPinValue, newPin: newPinValue });
       if (error) {
         setError(error.message);
         toast.error(error.message);
       } else {
         setSuccess(true);
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        toast.success('Password updated successfully');
+        setCurrentPin(['', '', '', '']);
+        setNewPin(['', '', '', '']);
+        toast.success('PIN updated successfully');
       }
     } catch {
-      setError('Failed to change password');
-      toast.error('Failed to change password');
+      setError('Failed to change PIN');
+      toast.error('Failed to change PIN');
     } finally {
-      setIsChangingPassword(false);
+      setIsChangingPin(false);
     }
   };
 
@@ -369,7 +384,7 @@ export default function SettingsPage() {
           </div>
         </motion.div>
 
-        {/* Change Password Section */}
+        {/* Change PIN Section */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -378,67 +393,49 @@ export default function SettingsPage() {
         >
           <div className="flex items-center gap-2 mb-4">
             <Key className="w-5 h-5 text-gray-600" />
-            <h3 className="font-semibold text-gray-900">Change Password</h3>
+            <h3 className="font-semibold text-gray-900">Change PIN</h3>
           </div>
 
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            <div className="relative">
-              <Input
-                type={showCurrentPassword ? 'text' : 'password'}
-                label="Current Password"
-                placeholder="Enter current password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                className="absolute right-4 top-[38px] text-gray-400"
-                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-              >
-                {showCurrentPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
+          <form onSubmit={handleChangePin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Current PIN</label>
+              <div className="flex gap-2 justify-center">
+                {currentPin.map((digit, i) => (
+                  <input
+                    key={`current-${i}`}
+                    ref={el => { currentPinRefs.current[i] = el; }}
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handlePinInput(currentPin, setCurrentPin, currentPinRefs, i, e.target.value)}
+                    onKeyDown={(e) => handlePinKeyDown(currentPin, currentPinRefs, i, e)}
+                    className="w-12 h-12 text-center text-xl font-bold border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none"
+                    autoComplete="off"
+                  />
+                ))}
+              </div>
             </div>
 
-            <div className="relative">
-              <Input
-                type={showNewPassword ? 'text' : 'password'}
-                label="New Password"
-                placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                className="absolute right-4 top-[38px] text-gray-400"
-                onClick={() => setShowNewPassword(!showNewPassword)}
-              >
-                {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">New PIN</label>
+              <div className="flex gap-2 justify-center">
+                {newPin.map((digit, i) => (
+                  <input
+                    key={`new-${i}`}
+                    ref={el => { newPinRefs.current[i] = el; }}
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handlePinInput(newPin, setNewPin, newPinRefs, i, e.target.value)}
+                    onKeyDown={(e) => handlePinKeyDown(newPin, newPinRefs, i, e)}
+                    className="w-12 h-12 text-center text-xl font-bold border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none"
+                    autoComplete="off"
+                  />
+                ))}
+              </div>
             </div>
-
-            <div className="relative">
-              <Input
-                type={showConfirmPassword ? 'text' : 'password'}
-                label="Confirm New Password"
-                placeholder="Confirm new password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                className="absolute right-4 top-[38px] text-gray-400"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              >
-                {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-500">
-              Password must be at least 8 characters
-            </p>
 
             {error && (
               <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-600">
@@ -449,16 +446,16 @@ export default function SettingsPage() {
             {success && (
               <div className="p-3 bg-green-50 border border-green-100 rounded-xl text-sm text-green-700 flex items-center gap-2">
                 <Check className="w-4 h-4" />
-                Password updated successfully
+                PIN updated successfully
               </div>
             )}
 
             <Button
               type="submit"
               fullWidth
-              isLoading={isChangingPassword}
+              isLoading={isChangingPin}
             >
-              Update Password
+              Update PIN
             </Button>
           </form>
         </motion.div>

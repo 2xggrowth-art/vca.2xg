@@ -11,7 +11,6 @@ services:
       POSTGRES_DB: viral_content_analyzer
     volumes:
       - vca-pgdata:/var/lib/postgresql/data
-      - ./supabase/migrations/00-create-authentik-db.sh:/docker-entrypoint-initdb.d/00-create-authentik-db.sh
       - ./supabase/migrations/self-hosted-init.sql:/docker-entrypoint-initdb.d/01-init.sql
     restart: unless-stopped
     healthcheck:
@@ -69,24 +68,13 @@ services:
       PORT: 3001
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@vca-postgres:5432/viral_content_analyzer
       FRONTEND_URL: ${FRONTEND_URL}
-      AUTHENTIK_URL: ${AUTHENTIK_URL}
-      AUTHENTIK_INTERNAL_URL: http://vca-authentik-server:9000
-      AUTHENTIK_JWKS_URI: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/.well-known/jwks.json
-      AUTHENTIK_ISSUER: ${AUTHENTIK_URL}/application/o/viral-content-analyzer/
-      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
-      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
-      AUTHENTIK_API_TOKEN: ${AUTHENTIK_API_TOKEN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: ${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}
       GOOGLE_DRIVE_RAW_FOOTAGE_FOLDER_ID: ${GOOGLE_DRIVE_RAW_FOOTAGE_FOLDER_ID}
       GOOGLE_DRIVE_EDITED_VIDEO_FOLDER_ID: ${GOOGLE_DRIVE_EDITED_VIDEO_FOLDER_ID}
       GOOGLE_DRIVE_FINAL_VIDEO_FOLDER_ID: ${GOOGLE_DRIVE_FINAL_VIDEO_FOLDER_ID}
       JWT_SECRET: ${JWT_SECRET}
       VOICE_NOTES_DIR: /data/voice-notes
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM}
     ports:
       - "3000:3001"
     volumes:
@@ -147,7 +135,7 @@ services:
         VITE_BACKEND_URL: https://vca-api.2xg.in
         VITE_POSTGREST_URL: https://vca-api.2xg.in/postgrest
         VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InNlbGYtaG9zdGVkIiwiaWF0IjoxNzcwNjIyOTY2LCJleHAiOjIwODYxOTg5NjZ9.MlToNcTzEBR0k9NLH3f0dU7RPHvkA_CCMgMwv9pEVxY
-        VITE_GOOGLE_CLIENT_ID: 635771661878-3srrbi7vmf0ebgac1c3u6s79ino12lav.apps.googleusercontent.com
+        VITE_GOOGLE_CLIENT_ID: 635771661878-goov8fvgqmh595pikf858p5tdn0ppl2h.apps.googleusercontent.com
         VITE_GOOGLE_API_KEY: ${VITE_GOOGLE_API_KEY:-your_api_key_here}
     container_name: vca-frontend-v2
     restart: unless-stopped
@@ -164,78 +152,6 @@ services:
           memory: 32m
     networks:
       - coolify
-
-  # ─── Authentik (Authentication) ──────────────────────────────────────────
-  vca-authentik-server:
-    image: ghcr.io/goauthentik/server:2024.12
-    container_name: vca-authentik-server
-    command: server
-    environment:
-      AUTHENTIK_REDIS__HOST: vca-authentik-redis
-      AUTHENTIK_POSTGRESQL__HOST: vca-postgres
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__USER: postgres
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${DB_PASSWORD}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-    depends_on:
-      vca-postgres:
-        condition: service_healthy
-      vca-authentik-redis:
-        condition: service_started
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.vca-authentik.rule=Host(`vca-auth.2xg.in`)"
-      - "traefik.http.routers.vca-authentik.entrypoints=http,https"
-      - "traefik.http.routers.vca-authentik.tls=true"
-      - "traefik.http.routers.vca-authentik.tls.certresolver=letsencrypt"
-      - "traefik.http.services.vca-authentik.loadbalancer.server.port=9000"
-    deploy:
-      resources:
-        limits:
-          memory: 600m
-    networks:
-      - vca-internal
-      - coolify
-
-  vca-authentik-worker:
-    image: ghcr.io/goauthentik/server:2024.12
-    container_name: vca-authentik-worker
-    command: worker
-    environment:
-      AUTHENTIK_REDIS__HOST: vca-authentik-redis
-      AUTHENTIK_POSTGRESQL__HOST: vca-postgres
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__USER: postgres
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${DB_PASSWORD}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-    depends_on:
-      vca-postgres:
-        condition: service_healthy
-      vca-authentik-redis:
-        condition: service_started
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 400m
-    networks:
-      - vca-internal
-
-  vca-authentik-redis:
-    image: redis:7-alpine
-    container_name: vca-authentik-redis
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 32m
-    networks:
-      - vca-internal
 
 volumes:
   vca-pgdata:

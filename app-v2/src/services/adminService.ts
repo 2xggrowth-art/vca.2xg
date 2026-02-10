@@ -594,27 +594,26 @@ export const adminService = {
   },
 
   /**
-   * Reset a user's password (Admin only)
+   * Reset a user's PIN (Admin only)
    */
-  async resetUserPassword(userId: string, temporaryPassword: string): Promise<{ success: boolean }> {
+  async resetUserPin(userId: string): Promise<{ success: boolean }> {
     const token = auth.getAccessToken();
     if (!token) {
       throw new Error('Not authenticated');
     }
 
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-    const res = await fetch(`${BACKEND_URL}/api/admin/users/${userId}/reset-password`, {
+    const res = await fetch(`${BACKEND_URL}/api/admin/users/${userId}/reset-pin`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ temporaryPassword }),
     });
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || 'Failed to reset password');
+      throw new Error(body.error || 'Failed to reset PIN');
     }
 
     return { success: true };

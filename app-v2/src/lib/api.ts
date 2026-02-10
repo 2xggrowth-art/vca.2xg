@@ -1,8 +1,8 @@
 /**
- * API Client — Drop-in Supabase-compatible wrapper
+ * API Client
  *
  * Uses:
- * - Auth via Express backend (Authentik)
+ * - Auth via Express backend (Google Sign-In + PIN)
  * - Database queries via PostgREST
  * - Storage via Express backend (local disk for voice notes)
  */
@@ -88,21 +88,10 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
 
   const response = await fetch(url, { ...options, headers });
 
-  // If we get 401 and have a refresh token, try refreshing
-  if (response.status === 401 && _refreshToken) {
-    console.log('Token expired, attempting refresh...');
-    const { data, error } = await auth.refreshSession();
-
-    if (!error && data?.session) {
-      // Retry with new token
-      console.log('Token refreshed, retrying request...');
-      headers.set('Authorization', `Bearer ${data.session.access_token}`);
-      return fetch(url, { ...options, headers });
-    } else {
-      console.error('Token refresh failed:', error);
-      // Refresh failed - user needs to log in again
-      _notifyAuthChange('SIGNED_OUT', null);
-    }
+  // If we get 401, session expired - user needs to log in again
+  if (response.status === 401) {
+    _saveSession(null);
+    _notifyAuthChange('SIGNED_OUT', null);
   }
 
   return response;
@@ -111,48 +100,9 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
 // ─── Auth Namespace ────────────────────────────────────────────────────────────────
 
 export const auth = {
-  async signUp({ email, password, options }: {
-    email: string;
-    password: string;
-    options?: { data?: Record<string, unknown> };
-  }) {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, ...(options?.data || {}) }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        return { data: { user: null, session: null }, error: { message: body.error || 'Signup failed', name: 'AuthApiError' } };
-      }
-      const session: AuthSession = body.session;
-      _saveSession(session);
-      _notifyAuthChange('SIGNED_IN', session);
-      return { data: { user: session.user, session }, error: null };
-    } catch (err) {
-      return { data: { user: null, session: null }, error: { message: err instanceof Error ? err.message : 'Signup failed', name: 'AuthApiError' } };
-    }
-  },
-
-  async signInWithPassword({ email, password }: { email: string; password: string }) {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        return { data: { user: null, session: null }, error: { message: body.error || 'Invalid credentials', name: 'AuthApiError' } };
-      }
-      const session: AuthSession = body.session;
-      _saveSession(session);
-      _notifyAuthChange('SIGNED_IN', session);
-      return { data: { user: session.user, session }, error: null };
-    } catch (err) {
-      return { data: { user: null, session: null }, error: { message: err instanceof Error ? err.message : 'Authentication failed', name: 'AuthApiError' } };
-    }
+  saveSession(session: AuthSession) {
+    _saveSession(session);
+    _notifyAuthChange('SIGNED_IN', session);
   },
 
   async signOut(): Promise<{ error: Error | null }> {
@@ -229,80 +179,18 @@ export const auth = {
     return _accessToken;
   },
 
-  async refreshSession(): Promise<{ data: { session: AuthSession } | null; error: { message: string } | null }> {
-    if (!_refreshToken) {
-      return { data: null, error: { message: 'No refresh token available' } };
-    }
-
+  async changePin({ currentPin, newPin }: { currentPin: string; newPin: string }): Promise<{ data: { success: boolean } | null; error: { message: string } | null }> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: _refreshToken }),
-      });
-
-      if (!res.ok) {
-        _saveSession(null);
-        _notifyAuthChange('SIGNED_OUT', null);
-        return { data: null, error: { message: 'Session expired. Please sign in again.' } };
-      }
-
-      const body = await res.json();
-      const newSession: AuthSession = {
-        access_token: body.access_token,
-        refresh_token: body.refresh_token || _refreshToken,
-        user: _user!,
-      };
-      _saveSession(newSession);
-      _notifyAuthChange('TOKEN_REFRESHED', newSession);
-      return { data: { session: newSession }, error: null };
-    } catch (err) {
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to refresh session' } };
-    }
-  },
-
-  async changePassword({ currentPassword, newPassword }: { currentPassword?: string; newPassword: string }): Promise<{ data: { success: boolean } | null; error: { message: string } | null }> {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/change-password`, {
+      const res = await fetch(`${BACKEND_URL}/api/auth/change-pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_accessToken}` },
-        body: JSON.stringify({ currentPassword, newPassword }),
+        body: JSON.stringify({ currentPin, newPin }),
       });
       const body = await res.json();
-      if (!res.ok) return { data: null, error: { message: body.error || 'Failed to change password' } };
+      if (!res.ok) return { data: null, error: { message: body.error || 'Failed to change PIN' } };
       return { data: { success: true }, error: null };
     } catch (err) {
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to change password' } };
-    }
-  },
-
-  async forgotPassword({ email }: { email: string }): Promise<{ data: { success: boolean } | null; error: { message: string } | null }> {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const body = await res.json();
-      if (!res.ok) return { data: null, error: { message: body.error || 'Failed to send reset email' } };
-      return { data: { success: true }, error: null };
-    } catch (err) {
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to send reset email' } };
-    }
-  },
-
-  async resetPassword({ token, newPassword }: { token?: string; newPassword: string }): Promise<{ data: { success: boolean } | null; error: { message: string } | null }> {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, newPassword }),
-      });
-      const body = await res.json();
-      if (!res.ok) return { data: null, error: { message: body.error || 'Failed to reset password' } };
-      return { data: { success: true }, error: null };
-    } catch (err) {
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to reset password' } };
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Failed to change PIN' } };
     }
   },
 };

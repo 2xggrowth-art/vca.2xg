@@ -484,13 +484,13 @@ describe('adminService', () => {
   });
 
   // ========================================
-  // resetUserPassword
+  // resetUserPin
   // ========================================
-  describe('resetUserPassword', () => {
+  describe('resetUserPin', () => {
     it('should throw if not authenticated', async () => {
       getAccessTokenMock.mockReturnValueOnce(null);
 
-      await expect(adminService.resetUserPassword('u1', 'newpass')).rejects.toThrow('Not authenticated');
+      await expect(adminService.resetUserPin('u1')).rejects.toThrow('Not authenticated');
     });
 
     it('should return success on successful reset', async () => {
@@ -499,11 +499,11 @@ describe('adminService', () => {
         json: () => Promise.resolve({ success: true }),
       });
 
-      const result = await adminService.resetUserPassword('u1', 'tempPass123');
+      const result = await adminService.resetUserPin('u1');
 
       expect(result).toEqual({ success: true });
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/admin/users/u1/reset-password'),
+        expect.stringContaining('/api/admin/users/u1/reset-pin'),
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -519,7 +519,7 @@ describe('adminService', () => {
         json: () => Promise.resolve({ error: 'Unauthorized' }),
       });
 
-      await expect(adminService.resetUserPassword('u1', 'temp')).rejects.toThrow('Unauthorized');
+      await expect(adminService.resetUserPin('u1')).rejects.toThrow('Unauthorized');
     });
 
     it('should throw generic message when response body has no error field', async () => {
@@ -528,7 +528,7 @@ describe('adminService', () => {
         json: () => Promise.resolve({}),
       });
 
-      await expect(adminService.resetUserPassword('u1', 'temp')).rejects.toThrow('Failed to reset password');
+      await expect(adminService.resetUserPin('u1')).rejects.toThrow('Failed to reset PIN');
     });
   });
 
