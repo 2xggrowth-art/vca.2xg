@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import { adminService, type ReviewData } from '@/services/adminService';
+import { supabase } from '@/lib/api';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -36,12 +37,29 @@ export default function ReviewPage() {
   const [replicationClarity, setReplicationClarity] = useState(8);
   const [feedback, setFeedback] = useState('');
   const [feedbackVoiceNote, setFeedbackVoiceNote] = useState<Blob | null>(null);
+  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
 
   useEffect(() => {
     if (id) {
       loadScript(id);
     }
+    loadProfiles();
   }, [id]);
+
+  const loadProfiles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profile_list')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      setProfiles((data as { id: string; name: string }[]) || []);
+    } catch (error) {
+      console.error('Failed to load profiles:', error);
+    }
+  };
 
   const loadScript = async (scriptId: string) => {
     try {
@@ -88,6 +106,7 @@ export default function ReviewPage() {
         replicationClarity,
         feedback: feedback.trim() || undefined,
         feedbackVoiceNote,
+        profileId: selectedProfileId || undefined,
       };
 
       await adminService.reviewAnalysis(id, reviewData);
@@ -302,6 +321,34 @@ export default function ReviewPage() {
             <span className="text-xs text-gray-500">Needs revision</span>
           </button>
         </div>
+
+        {/* Profile selector (shown on approve) */}
+        {decision === 'approve' && profiles.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mb-4"
+          >
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Assign to Profile (Optional)
+            </label>
+            <select
+              value={selectedProfileId}
+              onChange={(e) => setSelectedProfileId(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white text-gray-900"
+            >
+              <option value="">Select later</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Videographer can also select this later
+            </p>
+          </motion.div>
+        )}
 
         {/* Feedback (shown on reject) */}
         {decision === 'reject' && (

@@ -21,7 +21,6 @@ export default function VideographerHomePage() {
   const [myScripts, setMyScripts] = useState<ViralAnalysis[]>([]);
   const [availableProjects, setAvailableProjects] = useState<ViralAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
-  const [picking, setPicking] = useState<string | null>(null);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -58,19 +57,6 @@ export default function VideographerHomePage() {
       toast.error('Failed to load data');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePickProject = async (projectId: string) => {
-    try {
-      setPicking(projectId);
-      await videographerService.pickProject({ analysisId: projectId });
-      toast.success('Project picked successfully!');
-      navigate(`/videographer/project/${projectId}`);
-    } catch (error: any) {
-      console.error('Failed to pick project:', error);
-      toast.error(error.message || 'Failed to pick project');
-      setPicking(null);
     }
   };
 
@@ -476,15 +462,10 @@ export default function VideographerHomePage() {
                   </div>
                   <div className="px-4 pb-4">
                     <button
-                      onClick={() => handlePickProject(project.id)}
-                      disabled={picking === project.id}
-                      className="block w-full py-2.5 text-center bg-white border-2 border-orange-500 text-orange-500 text-sm font-semibold rounded-lg active:bg-orange-50 disabled:opacity-50"
+                      onClick={() => navigate('/videographer/available')}
+                      className="block w-full py-2.5 text-center bg-white border-2 border-orange-500 text-orange-500 text-sm font-semibold rounded-lg active:bg-orange-50"
                     >
-                      {picking === project.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : (
-                        'Pick This Project'
-                      )}
+                      View & Pick Projects
                     </button>
                   </div>
                 </div>
