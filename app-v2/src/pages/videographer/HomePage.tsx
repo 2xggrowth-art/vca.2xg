@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Loader2, Video, User, BarChart3, Settings, LogOut } from 'lucide-react';
+import { Loader2, Video, User, BarChart3, Settings, LogOut, X, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { videographerService, type VideographerStats } from '@/services/videographerService';
 import type { ViralAnalysis } from '@/types';
@@ -21,8 +22,16 @@ export default function VideographerHomePage() {
   const [myScripts, setMyScripts] = useState<ViralAnalysis[]>([]);
   const [availableProjects, setAvailableProjects] = useState<ViralAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
+  const [picking, setPicking] = useState<string | null>(null);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Profile selection modal state
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileModalProjectId, setProfileModalProjectId] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<{ id: string; name: string; is_active?: boolean }[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -57,6 +66,45 @@ export default function VideographerHomePage() {
       toast.error('Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openProfileModal = async (projectId: string) => {
+    setProfileModalProjectId(projectId);
+    setSelectedProfileId(null);
+    setShowProfileModal(true);
+
+    if (profiles.length === 0) {
+      setProfilesLoading(true);
+      try {
+        const data = await videographerService.getProfiles();
+        setProfiles(data);
+      } catch (error) {
+        console.error('Failed to load profiles:', error);
+        toast.error('Failed to load profiles');
+      } finally {
+        setProfilesLoading(false);
+      }
+    }
+  };
+
+  const handlePickWithProfile = async (profileId?: string) => {
+    if (!profileModalProjectId) return;
+    const projectId = profileModalProjectId;
+    setShowProfileModal(false);
+
+    try {
+      setPicking(projectId);
+      await videographerService.pickProject({
+        analysisId: projectId,
+        profileId: profileId || undefined,
+      });
+      toast.success('Project picked successfully!');
+      navigate(`/videographer/project/${projectId}`);
+    } catch (error: any) {
+      console.error('Failed to pick project:', error);
+      toast.error(error.message || 'Failed to pick project');
+      setPicking(null);
     }
   };
 
@@ -144,6 +192,7 @@ export default function VideographerHomePage() {
   }
 
   return (
+    <>
     <div className="pb-4">
       {/* Header with greeting */}
       <div className="flex items-center justify-between mb-6 relative">
@@ -462,10 +511,15 @@ export default function VideographerHomePage() {
                   </div>
                   <div className="px-4 pb-4">
                     <button
-                      onClick={() => navigate('/videographer/available')}
-                      className="block w-full py-2.5 text-center bg-white border-2 border-orange-500 text-orange-500 text-sm font-semibold rounded-lg active:bg-orange-50"
+                      onClick={() => openProfileModal(project.id)}
+                      disabled={picking === project.id}
+                      className="block w-full py-2.5 text-center bg-white border-2 border-orange-500 text-orange-500 text-sm font-semibold rounded-lg active:bg-orange-50 disabled:opacity-50"
                     >
-                      View & Pick Projects
+                      {picking === project.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                      ) : (
+                        'Pick This Project'
+                      )}
                     </button>
                   </div>
                 </div>
@@ -475,5 +529,90 @@ export default function VideographerHomePage() {
         </section>
       )}
     </div>
+
+    {/* Profile Selection Modal */}
+    {showProfileModal && createPortal(
+      <div className="fixed inset-0 bg-black/60 z-[10000] flex items-end sm:items-center justify-center" onClick={() => setShowProfileModal(false)}>
+        <div
+          className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[80vh] flex flex-col animate-slide-up"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Modal Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-100">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Select Profile</h3>
+              <p className="text-sm text-gray-500">Choose which profile this content is for</p>
+            </div>
+            <button
+              onClick={() => setShowProfileModal(false)}
+              className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
+            >
+              <X className="w-4 h-4 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Profile List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {profilesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+              </div>
+            ) : profiles.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">No profiles available</p>
+              </div>
+            ) : (
+              profiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  onClick={() => setSelectedProfileId(selectedProfileId === profile.id ? null : profile.id)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors text-left ${
+                    selectedProfileId === profile.id
+                      ? 'border-orange-500 bg-orange-50'
+                      : 'border-gray-100 bg-white active:bg-gray-50'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0 ${
+                    selectedProfileId === profile.id
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-gray-100'
+                  }`}>
+                    {selectedProfileId === profile.id ? (
+                      <Check className="w-5 h-5" />
+                    ) : (
+                      profile.name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <span className={`font-medium text-sm ${
+                    selectedProfileId === profile.id ? 'text-orange-700' : 'text-gray-800'
+                  }`}>
+                    {profile.name}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+
+          {/* Modal Actions */}
+          <div className="p-4 border-t border-gray-100 space-y-2">
+            <button
+              onClick={() => handlePickWithProfile(selectedProfileId || undefined)}
+              disabled={!selectedProfileId}
+              className="w-full h-12 flex items-center justify-center gap-2 bg-green-500 rounded-xl text-white font-semibold active:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Pick with Selected Profile
+            </button>
+            <button
+              onClick={() => handlePickWithProfile()}
+              className="w-full h-10 flex items-center justify-center text-sm text-gray-500 font-medium active:text-gray-700"
+            >
+              Pick without profile
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   );
 }
