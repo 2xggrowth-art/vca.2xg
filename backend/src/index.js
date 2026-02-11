@@ -171,6 +171,37 @@ app.post('/api/admin/users/:userId/reset-pin', verifyAdmin, async (req, res) => 
   }
 });
 
+// Update user role endpoint (Admin only)
+app.patch('/api/admin/users/:userId/role', verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (!userId || !role || !pool) {
+      return res.status(400).json({ error: 'User ID and role are required' });
+    }
+
+    const validRoles = ['SUPER_ADMIN', 'CREATOR', 'SCRIPT_WRITER', 'VIDEOGRAPHER', 'EDITOR', 'POSTING_MANAGER', 'ADMIN'];
+    if (!validRoles.includes(role.toUpperCase())) {
+      return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    }
+
+    const result = await pool.query(
+      'UPDATE profiles SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, full_name, role',
+      [role.toUpperCase(), userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    console.error('Update user role error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── Storage Routes (Voice Notes) ───────────────────────────────────────────
 
 const storageRoutes = require('./routes/storageRoutes');

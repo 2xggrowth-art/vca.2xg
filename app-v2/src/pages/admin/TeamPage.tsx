@@ -65,6 +65,11 @@ export default function TeamPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Edit role modal state
+  const [editRoleMember, setEditRoleMember] = useState<TeamMember | null>(null);
+  const [editRoleValue, setEditRoleValue] = useState('');
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+
   // Delete confirmation state
   const [deletingMember, setDeletingMember] = useState<TeamMember | null>(null);
 
@@ -140,15 +145,6 @@ export default function TeamPage() {
     setShowAddModal(true);
   };
 
-  const closeEditModal = (member: TeamMember) => {
-    setEditingMember(member);
-    setModalData({
-      name: member.full_name || '',
-      email: member.email,
-      role: member.role.toLowerCase(),
-    });
-    setShowAddModal(true);
-  };
 
   const closeModal = () => {
     setShowAddModal(false);
@@ -197,6 +193,26 @@ export default function TeamPage() {
       setDeletingMember(null);
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete member');
+    }
+  };
+
+  const openEditRole = (member: TeamMember) => {
+    setEditRoleMember(member);
+    setEditRoleValue(member.role.toLowerCase());
+  };
+
+  const confirmUpdateRole = async () => {
+    if (!editRoleMember || !editRoleValue) return;
+    setIsUpdatingRole(true);
+    try {
+      await adminService.updateUserRole(editRoleMember.id, editRoleValue);
+      toast.success(`${editRoleMember.full_name || 'User'} role updated to ${ROLE_OPTIONS.find(r => r.id === editRoleValue)?.label || editRoleValue}`);
+      setEditRoleMember(null);
+      loadData(true);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update role');
+    } finally {
+      setIsUpdatingRole(false);
     }
   };
 
@@ -380,9 +396,9 @@ export default function TeamPage() {
                     {/* Actions */}
                     <div className="flex gap-1.5">
                       <button
-                        onClick={() => setResetPinModal({ isOpen: true, user: member })}
+                        onClick={() => openEditRole(member)}
                         className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
-                        title="Reset PIN"
+                        title="Edit Member"
                       >
                         <Pencil className="w-4 h-4 text-gray-500" />
                       </button>
@@ -593,6 +609,77 @@ export default function TeamPage() {
           toast.success('PIN reset successfully');
         }}
       />
+
+      {/* Edit Role Modal */}
+      <AnimatePresence>
+        {editRoleMember && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-50"
+              onClick={() => setEditRoleMember(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl p-6 max-w-sm mx-auto"
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">Edit Member</h3>
+              <p className="text-sm text-gray-500 mb-4">{editRoleMember.full_name || editRoleMember.email}</p>
+
+              {/* Role selector */}
+              <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+              <div className="grid grid-cols-2 gap-2 mb-5">
+                {ROLE_OPTIONS.map((role) => (
+                  <button
+                    key={role.id}
+                    onClick={() => setEditRoleValue(role.id)}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-sm font-medium transition-colors ${
+                      editRoleValue === role.id
+                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span>{role.icon}</span>
+                    <span>{role.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 mb-3">
+                <button
+                  onClick={() => setEditRoleMember(null)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-xl text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmUpdateRole}
+                  disabled={isUpdatingRole || editRoleValue === editRoleMember.role.toLowerCase()}
+                  className="flex-1 py-2.5 bg-purple-500 text-white font-medium rounded-xl text-sm disabled:opacity-40"
+                >
+                  {isUpdatingRole ? 'Saving...' : 'Update Role'}
+                </button>
+              </div>
+
+              {/* Reset PIN option */}
+              <button
+                onClick={() => {
+                  setEditRoleMember(null);
+                  setResetPinModal({ isOpen: true, user: editRoleMember });
+                }}
+                className="w-full py-2.5 text-sm text-orange-600 font-medium border border-orange-200 rounded-xl hover:bg-orange-50 transition-colors"
+              >
+                Reset PIN
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

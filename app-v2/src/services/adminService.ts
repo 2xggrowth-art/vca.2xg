@@ -679,4 +679,31 @@ export const adminService = {
 
     return { success: true };
   },
+
+  /**
+   * Update a user's role (Admin only)
+   */
+  async updateUserRole(userId: string, role: string): Promise<{ success: boolean }> {
+    const token = auth.getAccessToken();
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+    const res = await fetch(`${BACKEND_URL}/api/admin/users/${userId}/role`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ role }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Failed to update role');
+    }
+
+    return { success: true };
+  },
 };
