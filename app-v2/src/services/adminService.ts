@@ -675,20 +675,23 @@ export const adminService = {
   /**
    * Create a new team member (Admin only)
    */
-  async createUser(email: string, fullName: string, role: string): Promise<{ success: boolean; user: any }> {
+  async createUser(email: string, fullName: string, role: string, pin?: string): Promise<{ success: boolean; user: any }> {
     const token = auth.getAccessToken();
     if (!token) {
       throw new Error('Not authenticated');
     }
 
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+    const body: Record<string, string> = { email, fullName, role: role.toUpperCase() };
+    if (pin) body.pin = pin;
+
     const res = await fetch(`${BACKEND_URL}/api/admin/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ email, fullName, role: role.toUpperCase() }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -727,7 +730,7 @@ export const adminService = {
   /**
    * Reset a user's PIN (Admin only)
    */
-  async resetUserPin(userId: string): Promise<{ success: boolean }> {
+  async resetUserPin(userId: string, pin?: string): Promise<{ success: boolean }> {
     const token = auth.getAccessToken();
     if (!token) {
       throw new Error('Not authenticated');
@@ -740,6 +743,7 @@ export const adminService = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
+      body: JSON.stringify(pin ? { pin } : {}),
     });
 
     if (!res.ok) {

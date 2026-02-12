@@ -82,7 +82,7 @@ app.use('/api/auth', authRoutes);
 // Create user endpoint (Admin only)
 app.post('/api/admin/users', verifyAdmin, async (req, res) => {
   try {
-    const { email, fullName, role } = req.body;
+    const { email, fullName, role, pin } = req.body;
 
     if (!email || !fullName || !role) {
       return res.status(400).json({
@@ -92,6 +92,16 @@ app.post('/api/admin/users', verifyAdmin, async (req, res) => {
 
     if (!pool) {
       return res.status(500).json({ error: 'Database not configured' });
+    }
+
+    // Validate PIN if provided
+    let pinHash = null;
+    if (pin) {
+      if (!/^\d{4}$/.test(pin)) {
+        return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+      }
+      const bcrypt = require('bcryptjs');
+      pinHash = await bcrypt.hash(pin, 10);
     }
 
     // Check if user already exists
@@ -109,9 +119,9 @@ app.post('/api/admin/users', verifyAdmin, async (req, res) => {
         [userId, email]
       );
       await client.query(
-        `INSERT INTO profiles (id, email, full_name, role, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-        [userId, email, fullName, role]
+        `INSERT INTO profiles (id, email, full_name, role, pin_hash, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+        [userId, email, fullName, role, pinHash]
       );
       await client.query('COMMIT');
     } catch (dbError) {
@@ -166,24 +176,39 @@ app.delete('/api/admin/users/:userId', verifyAdmin, async (req, res) => {
   }
 });
 
-// Reset user PIN endpoint (Admin only)
+// Set/Reset user PIN endpoint (Admin only)
+// If pin is provided, sets the PIN directly. If not, clears the PIN.
 app.post('/api/admin/users/:userId/reset-pin', verifyAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
+    const { pin } = req.body;
 
     if (!userId || !pool) {
       return res.status(400).json({ error: 'User ID is required' });
     }
 
-    // Clear PIN so user must set a new one on next Google sign-in
-    await pool.query(
-      'UPDATE profiles SET pin_hash = NULL, updated_at = NOW() WHERE id = $1',
-      [userId]
-    );
-
-    res.json({ success: true, message: 'PIN reset. User will set a new PIN on next login.' });
+    if (pin) {
+      // Admin is setting a specific PIN
+      if (!/^\d{4}$/.test(pin)) {
+        return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+      }
+      const bcrypt = require('bcryptjs');
+      const pinHash = await bcrypt.hash(pin, 10);
+      await pool.query(
+        'UPDATE profiles SET pin_hash = $1, updated_at = NOW() WHERE id = $2',
+        [pinHash, userId]
+      );
+      res.json({ success: true, message: 'PIN set successfully.' });
+    } else {
+      // Clear PIN so user must set a new one on next Google sign-in
+      await pool.query(
+        'UPDATE profiles SET pin_hash = NULL, updated_at = NOW() WHERE id = $1',
+        [userId]
+      );
+      res.json({ success: true, message: 'PIN reset. User will set a new PIN on next login.' });
+    }
   } catch (error) {
-    console.error('Admin reset PIN error:', error);
+    console.error('Admin set/reset PIN error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

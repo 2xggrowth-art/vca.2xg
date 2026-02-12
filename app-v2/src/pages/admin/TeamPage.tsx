@@ -62,6 +62,7 @@ export default function TeamPage() {
     name: '',
     email: '',
     role: '',
+    pin: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -150,7 +151,7 @@ export default function TeamPage() {
 
   const openAddModal = () => {
     setEditingMember(null);
-    setModalData({ name: '', email: '', role: '' });
+    setModalData({ name: '', email: '', role: '', pin: '' });
     setShowAddModal(true);
   };
 
@@ -158,7 +159,7 @@ export default function TeamPage() {
   const closeModal = () => {
     setShowAddModal(false);
     setEditingMember(null);
-    setModalData({ name: '', email: '', role: '' });
+    setModalData({ name: '', email: '', role: '', pin: '' });
   };
 
   const handleSaveMember = async () => {
@@ -175,9 +176,14 @@ export default function TeamPage() {
       return;
     }
 
+    if (modalData.pin && !/^\d{4}$/.test(modalData.pin)) {
+      toast.error('PIN must be exactly 4 digits');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await adminService.createUser(modalData.email.trim(), modalData.name.trim(), modalData.role);
+      await adminService.createUser(modalData.email.trim(), modalData.name.trim(), modalData.role, modalData.pin || undefined);
       toast.success(`${modalData.name} added as ${ROLE_OPTIONS.find(r => r.id === modalData.role)?.label}!`);
       closeModal();
       loadData(true);
@@ -540,6 +546,25 @@ export default function TeamPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* PIN Input (optional) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Set PIN <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={modalData.pin}
+                    onChange={(e) => setModalData({ ...modalData, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                    placeholder="4-digit PIN"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-center text-xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    If not set, user will create their own PIN on first login
+                  </p>
+                </div>
               </div>
 
               {/* Footer */}
@@ -675,7 +700,7 @@ export default function TeamPage() {
                 </button>
               </div>
 
-              {/* Reset PIN option */}
+              {/* Manage PIN option */}
               <button
                 onClick={() => {
                   setEditRoleMember(null);
@@ -683,7 +708,7 @@ export default function TeamPage() {
                 }}
                 className="w-full py-2.5 text-sm text-orange-600 font-medium border border-orange-200 rounded-xl hover:bg-orange-50 transition-colors"
               >
-                Reset PIN
+                Manage PIN
               </button>
             </motion.div>
           </>
