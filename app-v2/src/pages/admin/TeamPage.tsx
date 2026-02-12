@@ -618,14 +618,14 @@ export default function TeamPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-50"
+              className="fixed inset-0 bg-black/50 z-[60]"
               onClick={() => setEditRoleMember(null)}
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl p-6 max-w-sm mx-auto"
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[60] bg-white rounded-2xl p-6 max-w-sm mx-auto"
             >
               <h3 className="text-lg font-semibold text-gray-900 mb-1">Edit Member</h3>
               <p className="text-sm text-gray-500 mb-4">{editRoleMember.full_name || editRoleMember.email}</p>

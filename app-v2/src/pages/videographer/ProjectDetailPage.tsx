@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ExternalLink, Play, Pause, FileText, Video, Mic, Upload, Clock, MapPin, Loader2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ExternalLink, Play, Pause, FileText, Video, Mic, Upload, Clock, MapPin, Loader2, X, Check } from 'lucide-react';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui';
 import { videographerService } from '@/services/videographerService';
+import { supabase } from '@/lib/api';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -18,6 +20,13 @@ export default function ProjectDetailPage() {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [markingComplete, setMarkingComplete] = useState(false);
+
+  // Profile selection modal state (for generating content_id)
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [assigningProfile, setAssigningProfile] = useState(false);
 
   useEffect(() => {
     if (id) loadProject();
@@ -75,6 +84,65 @@ export default function ProjectDetailPage() {
       toast.error(error.message || 'Failed to mark as complete');
     } finally {
       setMarkingComplete(false);
+    }
+  };
+
+  const handleUploadClick = () => {
+    if (!project?.content_id) {
+      openProfileModal();
+    } else {
+      navigate(`/videographer/upload/${id}`);
+    }
+  };
+
+  const openProfileModal = async () => {
+    setSelectedProfileId(null);
+    setShowProfileModal(true);
+
+    if (profiles.length === 0) {
+      setProfilesLoading(true);
+      try {
+        const data = await videographerService.getProfiles();
+        setProfiles(data);
+      } catch (error) {
+        console.error('Failed to load profiles:', error);
+        toast.error('Failed to load profiles');
+      } finally {
+        setProfilesLoading(false);
+      }
+    }
+  };
+
+  const handleAssignProfile = async () => {
+    if (!selectedProfileId || !id) return;
+
+    try {
+      setAssigningProfile(true);
+
+      // Generate content_id via RPC
+      await supabase.rpc('generate_content_id_on_approval', {
+        p_analysis_id: id,
+        p_profile_id: selectedProfileId,
+      });
+
+      // Also update the profile_id on the analysis
+      await supabase
+        .from('viral_analyses')
+        .update({ profile_id: selectedProfileId })
+        .eq('id', id);
+
+      setShowProfileModal(false);
+      toast.success('Content ID generated!');
+
+      // Reload project to get updated content_id, then navigate to upload
+      const updated = await videographerService.getProjectById(id);
+      setProject(updated);
+      navigate(`/videographer/upload/${id}`);
+    } catch (error: any) {
+      console.error('Failed to assign profile:', error);
+      toast.error(error.message || 'Failed to generate Content ID');
+    } finally {
+      setAssigningProfile(false);
     }
   };
 
@@ -301,12 +369,10 @@ export default function ProjectDetailPage() {
             )}
 
             {project.production_stage === 'SHOOTING' && (
-              <Link to={`/videographer/upload/${id}`}>
-                <Button fullWidth className="mt-4 bg-videographer">
-                  <Upload className="w-5 h-5" />
-                  Upload Footage
-                </Button>
-              </Link>
+              <Button fullWidth className="mt-4 bg-videographer" onClick={handleUploadClick}>
+                <Upload className="w-5 h-5" />
+                Upload Footage
+              </Button>
             )}
           </div>
         )}
@@ -357,14 +423,91 @@ export default function ProjectDetailPage() {
               )}
             </Button>
           ) : (
-            <Link to={`/videographer/upload/${id}`}>
-              <Button fullWidth size="lg" className="bg-videographer shadow-lg">
-                <Upload className="w-5 h-5" />
-                Upload Footage
-              </Button>
-            </Link>
+            <Button fullWidth size="lg" className="bg-videographer shadow-lg" onClick={handleUploadClick}>
+              <Upload className="w-5 h-5" />
+              Upload Footage
+            </Button>
           )}
         </div>
+      )}
+
+      {/* Profile Selection Modal - shown when content_id is missing */}
+      {showProfileModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[10000] flex items-end sm:items-center justify-center" onClick={() => setShowProfileModal(false)}>
+          <div
+            className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[80vh] flex flex-col animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Select Profile</h3>
+                <p className="text-sm text-gray-500">A Content ID will be generated for this project</p>
+              </div>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {profilesLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+                </div>
+              ) : profiles.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 text-sm">No profiles available</p>
+                </div>
+              ) : (
+                profiles.map((profile) => (
+                  <button
+                    key={profile.id}
+                    onClick={() => setSelectedProfileId(selectedProfileId === profile.id ? null : profile.id)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors text-left ${
+                      selectedProfileId === profile.id
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-gray-100 bg-white active:bg-gray-50'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0 ${
+                      selectedProfileId === profile.id
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-gray-100'
+                    }`}>
+                      {selectedProfileId === profile.id ? (
+                        <Check className="w-5 h-5" />
+                      ) : (
+                        profile.name.charAt(0).toUpperCase()
+                      )}
+                    </div>
+                    <span className={`font-medium text-sm ${
+                      selectedProfileId === profile.id ? 'text-orange-700' : 'text-gray-800'
+                    }`}>
+                      {profile.name}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-100">
+              <button
+                onClick={handleAssignProfile}
+                disabled={!selectedProfileId || assigningProfile}
+                className="w-full h-12 flex items-center justify-center gap-2 bg-green-500 rounded-xl text-white font-semibold active:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {assigningProfile ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  'Assign Profile & Upload'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </>
   );
