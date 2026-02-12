@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { Pool } = require('pg');
 const { verifyAuth, verifyAdmin } = require('./middleware/jwtAuth');
 const voiceNoteService = require('./services/voiceNoteService');
@@ -46,8 +47,24 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Serve voice notes as static files
-app.use('/files/voice-notes', express.static(voiceNoteService.getBaseDir()));
+// Serve voice notes with authentication
+app.get('/files/voice-notes/*', verifyAuth, (req, res) => {
+  const filePath = req.params[0];
+  const normalized = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, '');
+  if (normalized !== path.normalize(filePath) || path.isAbsolute(filePath)) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const baseDir = path.resolve(voiceNoteService.getBaseDir());
+  const fullPath = path.resolve(baseDir, normalized);
+  if (!fullPath.startsWith(baseDir + path.sep) && fullPath !== baseDir) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  res.sendFile(fullPath, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'File not found' });
+    }
+  });
+});
 
 // ─── Health Check ───────────────────────────────────────────────────────────
 

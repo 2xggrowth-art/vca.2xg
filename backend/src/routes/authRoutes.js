@@ -16,6 +16,38 @@ const pool = process.env.DATABASE_URL ? new Pool({
   connectionString: process.env.DATABASE_URL,
 }) : null;
 
+// Simple in-memory rate limiter for PIN attempts
+const pinAttempts = new Map(); // key: email/ip -> { count, resetAt }
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkPinRateLimit(key) {
+  const now = Date.now();
+  const entry = pinAttempts.get(key);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= PIN_MAX_ATTEMPTS) {
+      const minutesLeft = Math.ceil((entry.resetAt - now) / 60000);
+      return { blocked: true, minutesLeft };
+    }
+    entry.count++;
+    return { blocked: false };
+  }
+  pinAttempts.set(key, { count: 1, resetAt: now + PIN_WINDOW_MS });
+  return { blocked: false };
+}
+
+function clearPinRateLimit(key) {
+  pinAttempts.delete(key);
+}
+
+// Clean up expired rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of pinAttempts) {
+    if (now >= entry.resetAt) pinAttempts.delete(key);
+  }
+}, 5 * 60 * 1000);
+
 /**
  * Verify Google ID token by calling Google's tokeninfo endpoint
  */
@@ -79,17 +111,27 @@ router.post('/google', async (req, res) => {
       profile = result.rows[0];
 
       if (!profile) {
-        // Create new user + profile
+        // Create new user + profile in a transaction
         const userId = crypto.randomUUID();
-        await pool.query(
-          'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (email) DO NOTHING',
-          [userId, googleUser.email]
-        );
-        await pool.query(
-          `INSERT INTO profiles (id, email, full_name, role, google_id, avatar_url, created_at, updated_at)
-           VALUES ($1, $2, $3, 'SCRIPT_WRITER', $4, $5, NOW(), NOW())`,
-          [userId, googleUser.email, googleUser.name, googleUser.googleId, googleUser.picture]
-        );
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (email) DO NOTHING',
+            [userId, googleUser.email]
+          );
+          await client.query(
+            `INSERT INTO profiles (id, email, full_name, role, google_id, avatar_url, created_at, updated_at)
+             VALUES ($1, $2, $3, 'SCRIPT_WRITER', $4, $5, NOW(), NOW())`,
+            [userId, googleUser.email, googleUser.name, googleUser.googleId, googleUser.picture]
+          );
+          await client.query('COMMIT');
+        } catch (dbError) {
+          await client.query('ROLLBACK');
+          throw dbError;
+        } finally {
+          client.release();
+        }
         profile = { id: userId, email: googleUser.email, full_name: googleUser.name, role: 'SCRIPT_WRITER', pin_hash: null, google_id: googleUser.googleId };
       } else if (!profile.google_id) {
         // Link Google account to existing profile
@@ -169,13 +211,15 @@ router.post('/set-pin', async (req, res) => {
     }
 
     // Hash and store PIN
-    const pinHash = await bcrypt.hash(pin, 10);
-    if (pool) {
-      await pool.query(
-        'UPDATE profiles SET pin_hash = $1, updated_at = NOW() WHERE id = $2',
-        [pinHash, decoded.sub]
-      );
+    if (!pool) {
+      return res.status(500).json({ error: 'Database not configured' });
     }
+
+    const pinHash = await bcrypt.hash(pin, 10);
+    await pool.query(
+      'UPDATE profiles SET pin_hash = $1, updated_at = NOW() WHERE id = $2',
+      [pinHash, decoded.sub]
+    );
 
     // Fetch profile for JWT
     const result = await pool.query(
@@ -222,9 +266,17 @@ router.post('/pin-login', async (req, res) => {
       return res.status(500).json({ error: 'Database not configured' });
     }
 
+    // Rate limit PIN attempts
+    const normalizedEmail = email.toLowerCase().trim();
+    const rateKey = `pin:${normalizedEmail}`;
+    const rateCheck = checkPinRateLimit(rateKey);
+    if (rateCheck.blocked) {
+      return res.status(429).json({ error: `Too many attempts. Try again in ${rateCheck.minutesLeft} minutes.` });
+    }
+
     const result = await pool.query(
-      'SELECT id, email, full_name, role, pin_hash FROM profiles WHERE email = $1',
-      [email]
+      'SELECT id, email, full_name, role, pin_hash FROM profiles WHERE LOWER(email) = $1',
+      [normalizedEmail]
     );
     const profile = result.rows[0];
 
@@ -236,6 +288,9 @@ router.post('/pin-login', async (req, res) => {
     if (!pinValid) {
       return res.status(401).json({ error: 'Invalid email or PIN' });
     }
+
+    // Clear rate limit on success
+    clearPinRateLimit(rateKey);
 
     const accessToken = mintPostgrestToken(profile.id, profile.email, profile.role);
     res.json({
@@ -274,6 +329,11 @@ router.post('/change-pin', async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
+    // Reject temporary tokens (pin_setup tokens should not be used for change-pin)
+    if (decoded.purpose === 'pin_setup') {
+      return res.status(401).json({ error: 'Invalid token for this operation' });
+    }
+
     const { currentPin, newPin } = req.body;
 
     if (!currentPin || !newPin) {
@@ -282,6 +342,10 @@ router.post('/change-pin', async (req, res) => {
 
     if (!/^\d{4}$/.test(newPin)) {
       return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+    }
+
+    if (!pool) {
+      return res.status(500).json({ error: 'Database not configured' });
     }
 
     // Verify current PIN

@@ -82,9 +82,13 @@ export default function EditorAvailablePage() {
   };
 
   const handleSkip = async (projectId: string) => {
-    editorService.rejectProject(projectId);
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    toast.success('Project hidden from list');
+    try {
+      await editorService.rejectProject(projectId);
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      toast.success('Project hidden from list');
+    } catch {
+      toast.error('Failed to skip project');
+    }
   };
 
   const handleDownloadAll = useCallback(async (files: any[], projectName: string, projectId: string) => {

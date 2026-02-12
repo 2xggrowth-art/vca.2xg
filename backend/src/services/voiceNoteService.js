@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VOICE_NOTES_DIR = process.env.VOICE_NOTES_DIR || '/data/voice-notes';
+const VOICE_NOTES_DIR = path.resolve(process.env.VOICE_NOTES_DIR || '/data/voice-notes');
 
 class VoiceNoteService {
   constructor() {
@@ -27,8 +27,20 @@ class VoiceNoteService {
    * @param {object} options - Upload options
    * @returns {{ path: string }}
    */
+  _validatePath(filePath) {
+    const normalized = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, '');
+    if (normalized !== path.normalize(filePath) || path.isAbsolute(filePath)) {
+      throw new Error('Invalid file path');
+    }
+    const fullPath = path.resolve(VOICE_NOTES_DIR, normalized);
+    if (fullPath !== VOICE_NOTES_DIR && !fullPath.startsWith(VOICE_NOTES_DIR + path.sep)) {
+      throw new Error('Invalid file path');
+    }
+    return fullPath;
+  }
+
   async uploadFile(fileBuffer, filePath, options = {}) {
-    const fullPath = path.join(VOICE_NOTES_DIR, filePath);
+    const fullPath = this._validatePath(filePath);
     const dir = path.dirname(fullPath);
 
     this._ensureDirectory(dir);
@@ -47,7 +59,7 @@ class VoiceNoteService {
    * @param {string} filePath - Relative path
    */
   async deleteFile(filePath) {
-    const fullPath = path.join(VOICE_NOTES_DIR, filePath);
+    const fullPath = this._validatePath(filePath);
     if (fs.existsSync(fullPath)) {
       fs.unlinkSync(fullPath);
     }
@@ -69,7 +81,7 @@ class VoiceNoteService {
    * @returns {Array<{ name: string, size: number }>}
    */
   async listFiles(folder) {
-    const fullPath = path.join(VOICE_NOTES_DIR, folder || '');
+    const fullPath = this._validatePath(folder || '');
     if (!fs.existsSync(fullPath)) return [];
 
     const entries = fs.readdirSync(fullPath, { withFileTypes: true });

@@ -5,10 +5,12 @@
 
 const express = require('express');
 const multer = require('multer');
+const { Pool } = require('pg');
 const googleDriveUploadService = require('../services/googleDriveUploadService');
 const { verifyAuth } = require('../middleware/jwtAuth');
 
 const router = express.Router();
+const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
 
 // Configure multer for memory storage (files stored in RAM temporarily)
 const upload = multer({
@@ -247,10 +249,36 @@ router.get('/download-zip', verifyAuth, async (req, res) => {
 /**
  * Delete file
  * DELETE /api/upload/:fileId
+ * Only the uploader or an admin can delete files
  */
 router.delete('/:fileId', verifyAuth, async (req, res) => {
   try {
     const { fileId } = req.params;
+
+    if (!pool) {
+      return res.status(500).json({ error: 'Database not configured' });
+    }
+
+    // Check file ownership - user must be uploader or admin
+    const fileResult = await pool.query(
+      'SELECT uploaded_by FROM production_files WHERE file_id = $1',
+      [fileId]
+    );
+
+    if (fileResult.rows.length === 0) {
+      return res.status(404).json({ error: 'File not found in database' });
+    }
+
+    const file = fileResult.rows[0];
+    const roleResult = await pool.query(
+      'SELECT role FROM profiles WHERE id = $1',
+      [req.user.id]
+    );
+    const userRole = roleResult.rows[0]?.role;
+    const isAdmin = ['SUPER_ADMIN', 'CREATOR'].includes(userRole);
+    if (file.uploaded_by !== req.user.id && !isAdmin) {
+      return res.status(403).json({ error: 'You can only delete files you uploaded' });
+    }
 
     await googleDriveUploadService.deleteFile(fileId);
 

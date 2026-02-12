@@ -132,11 +132,20 @@ export default function TeamPage() {
 
   const toggleAutoApprove = async (member: TeamMember) => {
     const newStatus = !member.is_trusted_writer;
-    toast.success(newStatus ? 'Auto-approval enabled! Scripts will be approved automatically.' : 'Auto-approval disabled. Scripts will need manual review.');
-    // Update local state
-    setTeamMembers(prev => prev.map(m =>
-      m.id === member.id ? { ...m, is_trusted_writer: newStatus } : m
-    ));
+    try {
+      const { supabase } = await import('@/lib/api');
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_trusted_writer: newStatus })
+        .eq('id', member.id);
+      if (error) throw error;
+      toast.success(newStatus ? 'Auto-approval enabled! Scripts will be approved automatically.' : 'Auto-approval disabled. Scripts will need manual review.');
+      setTeamMembers(prev => prev.map(m =>
+        m.id === member.id ? { ...m, is_trusted_writer: newStatus } : m
+      ));
+    } catch {
+      toast.error('Failed to update auto-approval status');
+    }
   };
 
   const openAddModal = () => {

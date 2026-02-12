@@ -152,8 +152,11 @@ class GoogleDriveUploadService {
     await this.initialize();
 
     try {
+      if (!folderName || !parentFolderId) return null;
+      const safeFolderName = folderName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const safeParentId = parentFolderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const response = await this.drive.files.list({
-        q: `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        q: `name='${safeFolderName}' and '${safeParentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
         fields: 'files(id, name)',
         spaces: 'drive',
         supportsAllDrives: true, // Support Shared Drives

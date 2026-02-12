@@ -217,7 +217,7 @@ export default function AvailablePage() {
   };
 
   const handleReject = async (projectId: string, inViewer = false) => {
-    videographerService.rejectProject(projectId);
+    await videographerService.rejectProject(projectId);
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
     toast.success('Project skipped');
 
