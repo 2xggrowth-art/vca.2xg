@@ -6,7 +6,7 @@ import { analysesService } from '@/services/analysesService';
 import type { AnalysisFormData } from '@/types';
 import toast from 'react-hot-toast';
 
-const SHOOT_TYPES = ['Indoor', 'Outdoor'];
+const SHOOT_TYPES = ['Indoor', 'Outdoor', 'Both'];
 
 const YES_NO_MAYBE = ['Yes', 'No', 'Maybe'];
 
@@ -118,7 +118,7 @@ export default function NewScriptPage() {
                     : 'bg-gray-100 text-gray-700'
                 }`}
               >
-                {type === 'Indoor' ? '🏠' : '🌳'} {type}
+                {type === 'Indoor' ? '🏠' : type === 'Outdoor' ? '🌳' : '🏠🌳'} {type}
               </button>
             ))}
           </div>
