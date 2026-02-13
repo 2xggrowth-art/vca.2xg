@@ -10,7 +10,7 @@ export default function AppShell({ role }: AppShellProps) {
   return (
     <div className="app-container">
       {/* Main content area */}
-      <main className="flex-1 pb-24 overflow-y-auto px-4 pt-6">
+      <main className="flex-1 pb-24 overflow-y-auto px-4 pt-safe">
         <Outlet />
       </main>
 

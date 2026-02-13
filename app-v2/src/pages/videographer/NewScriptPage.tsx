@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ChevronLeft, Check, Loader2, Plus, X } from 'lucide-react';
+import { ChevronLeft, Check, Loader2 } from 'lucide-react';
 import { analysesService } from '@/services/analysesService';
-import { videographerService } from '@/services/videographerService';
 import type { AnalysisFormData } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -17,82 +16,12 @@ const INITIAL_FORM_DATA: AnalysisFormData = {
   shootType: '',
   creatorName: '',
   worksWithoutAudio: '',
-  profileId: '',
 };
-
-interface Profile {
-  id: string;
-  name: string;
-}
 
 export default function VideographerNewScriptPage() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<AnalysisFormData>(INITIAL_FORM_DATA);
   const [submitting, setSubmitting] = useState(false);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(true);
-  const [showAddProfile, setShowAddProfile] = useState(false);
-  const [newProfileName, setNewProfileName] = useState('');
-  const [addingProfile, setAddingProfile] = useState(false);
-  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadProfiles();
-  }, []);
-
-  const loadProfiles = async () => {
-    try {
-      const data = await videographerService.getProfiles();
-      setProfiles(data);
-    } catch (error) {
-      console.error('Failed to load profiles:', error);
-    } finally {
-      setLoadingProfiles(false);
-    }
-  };
-
-  const handleAddProfile = async () => {
-    if (!newProfileName.trim()) {
-      toast.error('Please enter a profile name');
-      return;
-    }
-
-    try {
-      setAddingProfile(true);
-      const newProfile = await videographerService.createProfile(newProfileName.trim());
-      setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewProfileName('');
-      setShowAddProfile(false);
-      toast.success('Profile added');
-      // Auto-select the new profile
-      updateField('profileId', newProfile.id);
-    } catch (error) {
-      console.error('Failed to add profile:', error);
-      toast.error('Failed to add profile');
-    } finally {
-      setAddingProfile(false);
-    }
-  };
-
-  const handleDeleteProfile = async (profileId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    try {
-      setDeletingProfileId(profileId);
-      await videographerService.deleteProfile(profileId);
-      setProfiles((prev) => prev.filter((p) => p.id !== profileId));
-      // Clear selection if deleted profile was selected
-      if (formData.profileId === profileId) {
-        updateField('profileId', '');
-      }
-      toast.success('Profile removed');
-    } catch (error) {
-      console.error('Failed to delete profile:', error);
-      toast.error('Failed to delete profile');
-    } finally {
-      setDeletingProfileId(null);
-    }
-  };
 
   const updateField = <K extends keyof AnalysisFormData>(
     field: K,
@@ -104,10 +33,6 @@ export default function VideographerNewScriptPage() {
   const validateForm = (): boolean => {
     if (!formData.title.trim()) {
       toast.error('Please enter a title');
-      return false;
-    }
-    if (!formData.profileId) {
-      toast.error('Please select a profile');
       return false;
     }
     return true;
@@ -148,118 +73,6 @@ export default function VideographerNewScriptPage() {
         animate={{ opacity: 1, y: 0 }}
         className="space-y-3 px-4"
       >
-        {/* Profile Selector */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-900 mb-1">
-            Profile <span className="text-red-500">*</span>
-          </label>
-          {loadingProfiles ? (
-            <div className="flex items-center gap-2 py-2 text-gray-500 text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading profiles...
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {profiles.map((profile) => (
-                <div key={profile.id} className="relative group">
-                  <button
-                    type="button"
-                    onClick={() => updateField('profileId', profile.id)}
-                    className={`px-4 py-2 rounded-full font-medium text-xs transition-all active:scale-95 pr-7 ${
-                      formData.profileId === profile.id
-                        ? 'bg-videographer text-white'
-                        : 'bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    {profile.name}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeleteProfile(profile.id, e)}
-                    disabled={deletingProfileId === profile.id}
-                    className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
-                      formData.profileId === profile.id
-                        ? 'bg-white/20 text-white hover:bg-white/30'
-                        : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-                    }`}
-                  >
-                    {deletingProfileId === profile.id ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <X className="w-3 h-3" />
-                    )}
-                  </button>
-                </div>
-              ))}
-
-              {/* Add New Profile Button */}
-              {!showAddProfile && (
-                <button
-                  type="button"
-                  onClick={() => setShowAddProfile(true)}
-                  className="px-4 py-2 rounded-full font-medium text-xs bg-gray-100 text-gray-700 border-2 border-dashed border-gray-300 hover:border-videographer hover:text-videographer transition-all active:scale-95 flex items-center gap-1"
-                >
-                  <Plus className="w-3 h-3" />
-                  Add New
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Inline Add Profile Form */}
-          {showAddProfile && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="mt-2 flex gap-2"
-            >
-              <input
-                type="text"
-                value={newProfileName}
-                onChange={(e) => setNewProfileName(e.target.value)}
-                placeholder="Profile name (e.g., BCH)"
-                className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-videographer focus:border-videographer"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddProfile();
-                  } else if (e.key === 'Escape') {
-                    setShowAddProfile(false);
-                    setNewProfileName('');
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleAddProfile}
-                disabled={addingProfile}
-                className="px-4 py-2 bg-videographer text-white rounded-lg font-medium text-sm disabled:opacity-50 flex items-center gap-1"
-              >
-                {addingProfile ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Check className="w-4 h-4" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddProfile(false);
-                  setNewProfileName('');
-                }}
-                className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </motion.div>
-          )}
-
-          <p className="mt-1 text-xs text-gray-500">
-            Content ID will be auto-generated (e.g., BCH-1048)
-          </p>
-        </div>
-
         {/* Reference URL */}
         <div>
           <label className="block text-xs font-semibold text-gray-900 mb-1">

@@ -36,6 +36,10 @@ body {
 }
 
 /* ===== SAFE AREA PADDING ===== */
+.pt-safe {
+  padding-top: calc(1.5rem + env(safe-area-inset-top));
+}
+
 .pb-safe {
   padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
 }

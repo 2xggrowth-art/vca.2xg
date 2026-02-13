@@ -380,7 +380,7 @@ export default function UploadPage() {
         showBack
       />
 
-      <div className="px-4 py-4 pb-56">
+      <div className="px-4 py-4 pb-72">
         {/* Project Info Card */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
           <div className="flex items-start gap-3">
@@ -678,8 +678,8 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Fixed Bottom Buttons - positioned above bottom nav */}
-      <div className="fixed bottom-[68px] left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40">
+      {/* Fixed Bottom Buttons - positioned above bottom nav with safe area */}
+      <div className="fixed left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 max-w-mobile mx-auto z-40" style={{ bottom: 'calc(68px + env(safe-area-inset-bottom))' }}>
         <div className="flex flex-col gap-2">
           {isUploading ? (
             <Button fullWidth size="lg" variant="outline" onClick={cancelUpload}>
