@@ -415,6 +415,7 @@ export interface AnalysisFormData {
   creatorName: string;
   worksWithoutAudio: string;
   profileId?: string;
+  productionNotes?: string;
 
   // Legacy fields (kept for backwards compatibility)
   platform?: string;

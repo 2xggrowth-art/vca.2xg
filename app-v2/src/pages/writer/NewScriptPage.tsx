@@ -161,6 +161,23 @@ export default function NewScriptPage() {
           </div>
         </div>
 
+        {/* Notes for Team */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-900 mb-1">
+            Notes for Team
+          </label>
+          <p className="text-[11px] text-gray-500 mb-1.5">
+            Instructions for the videographer & editor
+          </p>
+          <textarea
+            value={formData.productionNotes || ''}
+            onChange={(e) => updateField('productionNotes', e.target.value)}
+            placeholder="E.g. shoot close-up first, use warm lighting, add subtitles..."
+            rows={3}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+          />
+        </div>
+
         {/* Submit Button */}
         <button
           type="button"

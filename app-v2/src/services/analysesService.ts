@@ -221,6 +221,9 @@ export const analysesService = {
         creator_name: formData.creatorName || null,
         works_without_audio: formData.worksWithoutAudio || null,
 
+        // Notes for team
+        production_notes: formData.productionNotes ? `[Script Writer Notes]\n${formData.productionNotes}` : null,
+
         // Profile/Industry
         profile_id: formData.profileId || null,
         industry_id: formData.industryId || null,

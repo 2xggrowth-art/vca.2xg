@@ -327,6 +327,16 @@ export default function ProjectDetailPage() {
                 <p className="text-sm text-gray-400">No voice notes available</p>
               )}
             </div>
+
+            {/* Script Writer Notes */}
+            {project.production_notes && (
+              <div className="p-4 rounded-xl bg-blue-50 border border-blue-200">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Notes from Writer
+                </h3>
+                <p className="text-gray-800 whitespace-pre-wrap text-sm">{project.production_notes}</p>
+              </div>
+            )}
           </div>
         )}
 
