@@ -225,6 +225,14 @@ export default function EditorProjectDetailPage() {
           </a>
         )}
 
+        {/* Rejection Feedback Banner - shown prominently at top */}
+        {project.production_stage === 'EDITING' && project.disapproval_reason && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-4">
+            <p className="text-sm font-semibold text-red-700 mb-1">Edit Rejected - Please Revise</p>
+            <p className="text-sm text-red-600 whitespace-pre-wrap">{project.disapproval_reason}</p>
+          </div>
+        )}
+
         {/* Tab Switcher */}
         <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
           {[
@@ -396,45 +404,121 @@ export default function EditorProjectDetailPage() {
               )}
             </div>
 
-            {/* Edited Files */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">Edited Videos</h3>
-                <span className="text-xs text-gray-500">{editedFiles.length} files</span>
-              </div>
+            {/* Edited Files - separated into recent and older */}
+            {(() => {
+              // If there's a disapproval_reason, the most recent edited files are the "new" revision
+              // Split by: files uploaded after the most recent rejection (approximated by updated_at on the project)
+              const sortedEdited = [...editedFiles].sort((a: any, b: any) =>
+                new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+              );
 
-              {editedFiles.length > 0 ? (
-                <div className="grid grid-cols-2 gap-3">
-                  {editedFiles.map((file: any) => {
-                    const typeInfo = getFileTypeInfo(file.file_type);
-                    return (
-                      <a
-                        key={file.id}
-                        href={file.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-50 rounded-xl border border-green-200 p-3 text-center card-press"
-                      >
-                        <div className="text-3xl mb-2">{typeInfo.icon}</div>
-                        <p className="font-medium text-gray-900 text-sm truncate">{file.file_name?.split('.')[0]}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {file.file_size ? `${(file.file_size / 1024 / 1024).toFixed(0)} MB` : '—'}
-                        </p>
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium mt-2 bg-green-200 text-green-700">
-                          {typeInfo.label}
-                        </span>
-                      </a>
-                    );
-                  })}
+              // If project was rejected, find files uploaded after the project was last updated (re-entered EDITING)
+              const hasRejection = !!project.disapproval_reason;
+              let recentEdits: any[] = [];
+              let olderEdits: any[] = [];
+
+              if (hasRejection && sortedEdited.length > 1) {
+                // Group: latest batch = files sharing the most recent date (within 1 hour of newest)
+                const newestTime = new Date(sortedEdited[0]?.created_at || 0).getTime();
+                recentEdits = sortedEdited.filter((f: any) =>
+                  newestTime - new Date(f.created_at || 0).getTime() < 3600000
+                );
+                olderEdits = sortedEdited.filter((f: any) =>
+                  newestTime - new Date(f.created_at || 0).getTime() >= 3600000
+                );
+              } else {
+                recentEdits = sortedEdited;
+              }
+
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">Edited Videos</h3>
+                    <span className="text-xs text-gray-500">{editedFiles.length} files</span>
+                  </div>
+
+                  {editedFiles.length > 0 ? (
+                    <div className="space-y-4">
+                      {/* Recent edits (highlighted) */}
+                      {recentEdits.length > 0 && (
+                        <div>
+                          {olderEdits.length > 0 && (
+                            <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-2">
+                              Latest Edit
+                            </p>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            {recentEdits.map((file: any) => {
+                              const typeInfo = getFileTypeInfo(file.file_type);
+                              return (
+                                <a
+                                  key={file.id}
+                                  href={file.file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`rounded-xl p-3 text-center card-press ${
+                                    olderEdits.length > 0
+                                      ? 'bg-green-50 border-2 border-green-400 ring-2 ring-green-200'
+                                      : 'bg-green-50 border border-green-200'
+                                  }`}
+                                >
+                                  <div className="text-3xl mb-2">{typeInfo.icon}</div>
+                                  <p className="font-medium text-gray-900 text-sm truncate">{file.file_name?.split('.')[0]}</p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {file.file_size ? `${(file.file_size / 1024 / 1024).toFixed(0)} MB` : '—'}
+                                  </p>
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium mt-2 bg-green-200 text-green-700">
+                                    {olderEdits.length > 0 ? 'New' : typeInfo.label}
+                                  </span>
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Older edits (dimmed) */}
+                      {olderEdits.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                            Previous Edits
+                          </p>
+                          <div className="grid grid-cols-2 gap-3 opacity-60">
+                            {olderEdits.map((file: any) => {
+                              const typeInfo = getFileTypeInfo(file.file_type);
+                              return (
+                                <a
+                                  key={file.id}
+                                  href={file.file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-gray-50 rounded-xl border border-gray-200 p-3 text-center card-press"
+                                >
+                                  <div className="text-3xl mb-2">{typeInfo.icon}</div>
+                                  <p className="font-medium text-gray-900 text-sm truncate">{file.file_name?.split('.')[0]}</p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {file.file_size ? `${(file.file_size / 1024 / 1024).toFixed(0)} MB` : '—'}
+                                  </p>
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium mt-2 bg-gray-200 text-gray-500">
+                                    {typeInfo.label}
+                                  </span>
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 bg-gray-50 rounded-xl">
+                      <Video className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500">No edited videos yet</p>
+                      <p className="text-sm text-gray-400 mt-1">Upload your edited video to complete</p>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="text-center py-8 bg-gray-50 rounded-xl">
-                  <Video className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">No edited videos yet</p>
-                  <p className="text-sm text-gray-400 mt-1">Upload your edited video to complete</p>
-                </div>
-              )}
-            </div>
+              );
+            })()}
 
             {project.production_stage === 'EDITING' && (
               <div className="space-y-3">
@@ -537,14 +621,6 @@ export default function EditorProjectDetailPage() {
             <p className="font-medium text-amber-700">Under Admin Review</p>
             <p className="text-sm text-amber-600 mt-1">Your edit is being reviewed. You'll be notified of the result.</p>
           </div>
-        </div>
-      )}
-
-      {/* Rejection Feedback Banner */}
-      {project.production_stage === 'EDITING' && project.disapproval_reason && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mx-4 mb-4">
-          <p className="text-sm font-medium text-red-700 mb-1">Edit Rejected - Please Revise</p>
-          <p className="text-sm text-red-600">{project.disapproval_reason}</p>
         </div>
       )}
 

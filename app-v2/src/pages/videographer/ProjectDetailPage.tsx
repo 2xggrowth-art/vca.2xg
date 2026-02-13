@@ -378,10 +378,10 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {project.production_stage === 'SHOOTING' && (
+            {['SHOOTING', 'READY_FOR_EDIT', 'EDITING'].includes(project.production_stage || '') && (
               <Button fullWidth className="mt-4 bg-videographer" onClick={handleUploadClick}>
                 <Upload className="w-5 h-5" />
-                Upload Footage
+                {project.production_stage === 'SHOOTING' ? 'Upload Footage' : 'Add More Footage'}
               </Button>
             )}
           </div>
@@ -438,6 +438,16 @@ export default function ProjectDetailPage() {
               Upload Footage
             </Button>
           )}
+        </div>
+      )}
+
+      {/* Add More Footage button for completed shoots */}
+      {['READY_FOR_EDIT', 'EDITING'].includes(project.production_stage || '') && (
+        <div className="fixed bottom-20 left-0 right-0 px-4 pb-4 bg-gradient-to-t from-white via-white to-transparent pt-4 max-w-mobile mx-auto">
+          <Button fullWidth size="lg" variant="outline" onClick={handleUploadClick}>
+            <Upload className="w-5 h-5" />
+            Add More Footage
+          </Button>
         </div>
       )}
 

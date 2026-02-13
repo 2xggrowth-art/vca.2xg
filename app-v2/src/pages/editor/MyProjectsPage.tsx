@@ -65,6 +65,7 @@ export default function EditorMyProjectsPage() {
 
   // Group projects by status
   const editingProjects = projects.filter((p) => p.production_stage === 'EDITING');
+  const reviewProjects = projects.filter((p) => p.production_stage === 'EDIT_REVIEW');
   const completedProjects = projects.filter((p) =>
     ['READY_TO_POST', 'POSTED'].includes(p.production_stage || '')
   );
@@ -79,7 +80,7 @@ export default function EditorMyProjectsPage() {
   const readyToUploadProjects = editingProjects.filter((p) => !hasEditedFiles(p));
   const inEditingProjects = editingProjects.filter((p) => hasEditedFiles(p));
 
-  const activeCount = editingProjects.length;
+  const activeCount = editingProjects.length + reviewProjects.length;
   const completedCount = completedProjects.length;
 
   const getFileCount = (project: ViralAnalysis) => {
@@ -285,6 +286,46 @@ export default function EditorMyProjectsPage() {
                       </Link>
                     );
                   })}
+                </div>
+              </section>
+            )}
+
+            {/* Under Review */}
+            {reviewProjects.length > 0 && (
+              <section className="animate-slide-up delay-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <h2 className="text-sm font-semibold text-amber-600 uppercase tracking-wide">
+                    Under Review ({reviewProjects.length})
+                  </h2>
+                </div>
+
+                <div className="space-y-3">
+                  {reviewProjects.map((project) => (
+                    <Link
+                      key={project.id}
+                      to={`/editor/project/${project.id}`}
+                      className="block bg-amber-50 rounded-xl p-4 border-2 border-amber-200 card-press"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h3 className="font-semibold text-gray-900">{project.title || 'Untitled'}</h3>
+                          <p className="text-sm text-gray-500 font-mono">{project.content_id || 'No ID'}</p>
+                        </div>
+                        <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                          <Clock className="w-5 h-5 text-amber-600" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-1 bg-white rounded text-gray-600">
+                          {project.profile?.name || 'No profile'}
+                        </span>
+                        <span className="text-xs text-amber-600 font-medium">
+                          Waiting for admin review
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
                 </div>
               </section>
             )}
