@@ -542,22 +542,88 @@ export default function ProjectDetailPage() {
                       <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">{editedFiles.length}</span>
                     )}
                   </h3>
-                  {renderFileList(editedFiles) || (
-                    (project as any).edited_file_url || (project as any).edited_video_drive_url ? (
-                      <a
-                        href={(project as any).edited_file_url || (project as any).edited_video_drive_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
-                      >
-                        <FileVideo className="w-4 h-4" />
-                        <span className="flex-1">View Edited Video</span>
-                        <Download className="w-4 h-4" />
-                      </a>
-                    ) : (
-                      <p className="text-sm text-gray-400">No edited video uploaded yet</p>
-                    )
-                  )}
+                  {(() => {
+                    if (editedFiles.length === 0) {
+                      return (project as any).edited_file_url || (project as any).edited_video_drive_url ? (
+                        <a
+                          href={(project as any).edited_file_url || (project as any).edited_video_drive_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-purple-600 text-sm bg-purple-50 px-3 py-2 rounded-lg"
+                        >
+                          <FileVideo className="w-4 h-4" />
+                          <span className="flex-1">View Edited Video</span>
+                          <Download className="w-4 h-4" />
+                        </a>
+                      ) : (
+                        <p className="text-sm text-gray-400">No edited video uploaded yet</p>
+                      );
+                    }
+
+                    const sortedEdited = [...editedFiles].sort((a: any, b: any) =>
+                      new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+                    );
+                    const hasRejection = !!project.disapproval_reason;
+
+                    if (hasRejection && sortedEdited.length > 1) {
+                      const newestTime = new Date(sortedEdited[0]?.created_at || 0).getTime();
+                      const recentEdits = sortedEdited.filter((f: any) =>
+                        newestTime - new Date(f.created_at || 0).getTime() < 3600000
+                      );
+                      const olderEdits = sortedEdited.filter((f: any) =>
+                        newestTime - new Date(f.created_at || 0).getTime() >= 3600000
+                      );
+
+                      return (
+                        <div className="space-y-3">
+                          {recentEdits.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-green-700 mb-1.5">Latest Edit</p>
+                              <div className="space-y-2">
+                                {recentEdits.map((file: any) => (
+                                  <a
+                                    key={file.id}
+                                    href={file.drive_view_link || file.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-purple-600 text-sm bg-green-50 border border-green-200 px-3 py-2 rounded-lg ring-2 ring-green-400"
+                                  >
+                                    <FileVideo className="w-4 h-4" />
+                                    <span className="flex-1 truncate">{file.file_name || file.file_type}</span>
+                                    <span className="text-xs text-green-600 font-medium shrink-0">New</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {olderEdits.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 mb-1.5">Previous Edits (Rejected)</p>
+                              <div className="space-y-2 opacity-60">
+                                {olderEdits.map((file: any) => (
+                                  <a
+                                    key={file.id}
+                                    href={file.drive_view_link || file.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-gray-500 text-sm bg-gray-50 px-3 py-2 rounded-lg"
+                                  >
+                                    <FileVideo className="w-4 h-4" />
+                                    <span className="flex-1 truncate">{file.file_name || file.file_type}</span>
+                                    <span className="text-xs text-gray-400 shrink-0">Rejected</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return renderFileList(editedFiles);
+                  })()}
                 </div>
 
                 {/* Final Video */}
