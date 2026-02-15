@@ -6,7 +6,7 @@ import { adminService, type QueueStats } from '@/services/adminService';
 import type { ViralAnalysis } from '@/types';
 import toast from 'react-hot-toast';
 
-type FilterType = 'all' | 'shooting' | 'editing' | 'edit_review' | 'ready';
+type FilterType = 'all' | 'planning' | 'shooting' | 'editing' | 'edit_review' | 'ready';
 
 interface StageSection {
   id: string;
@@ -19,6 +19,15 @@ interface StageSection {
 }
 
 const STAGE_SECTIONS: StageSection[] = [
+  {
+    id: 'planning',
+    emoji: '📋',
+    label: 'Planning',
+    color: 'bg-blue-500',
+    bgColor: 'bg-blue-50',
+    textColor: 'text-blue-600',
+    stages: ['PLANNING', 'NOT_STARTED', 'PRE_PRODUCTION', 'PLANNED'],
+  },
   {
     id: 'shooting',
     emoji: '🎬',
@@ -70,8 +79,9 @@ export default function ProductionPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [statsData, shootingProjects, editingProjects, readyForEditProjects, editReviewProjects, readyToPostProjects] = await Promise.all([
+      const [statsData, planningProjects, shootingProjects, editingProjects, readyForEditProjects, editReviewProjects, readyToPostProjects] = await Promise.all([
         adminService.getQueueStats(),
+        adminService.getAnalysesByStage('planning'),
         adminService.getAnalysesByStage('shooting'),
         adminService.getAnalysesByStage('editing'),
         adminService.getAnalysesByStage('ready_for_edit'),
@@ -79,7 +89,7 @@ export default function ProductionPage() {
         adminService.getAnalysesByStage('ready_to_post'),
       ]);
       setStats(statsData);
-      setAllProjects([...shootingProjects, ...readyForEditProjects, ...editingProjects, ...editReviewProjects, ...readyToPostProjects]);
+      setAllProjects([...planningProjects, ...shootingProjects, ...readyForEditProjects, ...editingProjects, ...editReviewProjects, ...readyToPostProjects]);
     } catch (error) {
       console.error('Failed to load data:', error);
       toast.error('Failed to load production data');
@@ -91,7 +101,11 @@ export default function ProductionPage() {
   const getProjectsBySection = (sectionId: string) => {
     const section = STAGE_SECTIONS.find(s => s.id === sectionId);
     if (!section) return [];
-    return allProjects.filter(p => section.stages.includes(p.production_stage || ''));
+    return allProjects.filter(p => {
+      const stage = p.production_stage || '';
+      if (sectionId === 'planning' && !stage) return true; // null stage = planning
+      return section.stages.includes(stage);
+    });
   };
 
   const getFilteredSections = () => {
@@ -127,6 +141,10 @@ export default function ProductionPage() {
 
   const getStageProgress = (stage?: string) => {
     switch (stage) {
+      case 'PLANNING':
+      case 'NOT_STARTED':
+      case 'PRE_PRODUCTION':
+      case 'PLANNED': return 5;
       case 'SHOOTING': return 20;
       case 'READY_FOR_EDIT':
       case 'SHOOT_REVIEW': return 40;
@@ -134,11 +152,11 @@ export default function ProductionPage() {
       case 'EDIT_REVIEW': return 75;
       case 'READY_TO_POST':
       case 'FINAL_REVIEW': return 90;
-      default: return 10;
+      default: return 5;
     }
   };
 
-  const totalPipeline = (stats?.shooting || 0) + (stats?.readyForEdit || 0) + (stats?.editing || 0) + (stats?.editReview || 0) + (stats?.readyToPost || 0);
+  const totalPipeline = (stats?.planning || 0) + (stats?.shooting || 0) + (stats?.readyForEdit || 0) + (stats?.editing || 0) + (stats?.editReview || 0) + (stats?.readyToPost || 0);
 
   if (loading) {
     return (
@@ -173,8 +191,12 @@ export default function ProductionPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
-        className="grid grid-cols-5 gap-2 mb-4"
+        className="grid grid-cols-3 gap-2 mb-4"
       >
+        <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
+          <div className="text-xl font-bold text-blue-500">{stats?.planning || 0}</div>
+          <div className="text-[10px] text-gray-500 uppercase">Planning</div>
+        </div>
         <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
           <div className="text-xl font-bold text-orange-500">{stats?.shooting || 0}</div>
           <div className="text-[10px] text-gray-500 uppercase">Shooting</div>
@@ -215,6 +237,19 @@ export default function ProductionPage() {
           All
           <span className={`px-1.5 py-0.5 rounded-full text-xs ${filter === 'all' ? 'bg-white/20' : 'bg-gray-200'}`}>
             {totalPipeline}
+          </span>
+        </button>
+        <button
+          onClick={() => setFilter('planning')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+            filter === 'planning'
+              ? 'bg-blue-500 text-white'
+              : 'bg-gray-100 text-gray-600'
+          }`}
+        >
+          Planning
+          <span className={`px-1.5 py-0.5 rounded-full text-xs ${filter === 'planning' ? 'bg-white/20' : 'bg-gray-200'}`}>
+            {stats?.planning || 0}
           </span>
         </button>
         <button

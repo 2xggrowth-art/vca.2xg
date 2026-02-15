@@ -591,10 +591,12 @@ export const adminService = {
    */
   async getAnalysesByStage(stage: string): Promise<ViralAnalysis[]> {
     let stageFilter: string[];
+    let includeNullStage = false;
 
     switch (stage) {
       case 'planning':
         stageFilter = ['PLANNING', 'NOT_STARTED', 'PRE_PRODUCTION', 'PLANNED'];
+        includeNullStage = true;
         break;
       case 'shooting':
         stageFilter = ['SHOOTING'];
@@ -618,17 +620,48 @@ export const adminService = {
         stageFilter = [stage.toUpperCase()];
     }
 
+    const selectQuery = `
+      *,
+      profiles:user_id (email, full_name, avatar_url),
+      profile:profile_list (id, name, platform),
+      assignments:project_assignments (
+        id, role,
+        user:profiles!project_assignments_user_id_fkey (id, email, full_name)
+      )
+    `;
+
+    const mapAnalysis = (analysis: any) => ({
+      ...analysis,
+      email: analysis.profiles?.email,
+      full_name: analysis.profiles?.full_name,
+      avatar_url: analysis.profiles?.avatar_url,
+      videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
+      editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
+    });
+
+    if (includeNullStage) {
+      // For planning: fetch both explicit planning stages AND null production_stage
+      const [stageResult, nullResult] = await Promise.all([
+        supabase.from('viral_analyses').select(selectQuery)
+          .eq('status', 'APPROVED').in('production_stage', stageFilter)
+          .order('created_at', { ascending: false }),
+        supabase.from('viral_analyses').select(selectQuery)
+          .eq('status', 'APPROVED').is('production_stage', null)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (stageResult.error) throw stageResult.error;
+      if (nullResult.error) throw nullResult.error;
+
+      const stageData = (Array.isArray(stageResult.data) ? stageResult.data : []) as any[];
+      const nullData = (Array.isArray(nullResult.data) ? nullResult.data : []) as any[];
+      const all = [...stageData, ...nullData];
+      return all.map(mapAnalysis) as ViralAnalysis[];
+    }
+
     const { data, error } = await supabase
       .from('viral_analyses')
-      .select(`
-        *,
-        profiles:user_id (email, full_name, avatar_url),
-        profile:profile_list (id, name, platform),
-        assignments:project_assignments (
-          id, role,
-          user:profiles!project_assignments_user_id_fkey (id, email, full_name)
-        )
-      `)
+      .select(selectQuery)
       .eq('status', 'APPROVED')
       .in('production_stage', stageFilter)
       .order('created_at', { ascending: false });
@@ -636,14 +669,7 @@ export const adminService = {
     if (error) throw error;
 
     const stageAnalyses = (data || []) as any[];
-    return stageAnalyses.map((analysis: any) => ({
-      ...analysis,
-      email: analysis.profiles?.email,
-      full_name: analysis.profiles?.full_name,
-      avatar_url: analysis.profiles?.avatar_url,
-      videographer: analysis.assignments?.find((a: any) => a.role === 'VIDEOGRAPHER')?.user,
-      editor: analysis.assignments?.find((a: any) => a.role === 'EDITOR')?.user,
-    })) as ViralAnalysis[];
+    return stageAnalyses.map(mapAnalysis) as ViralAnalysis[];
   },
 
   /**

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckCircle, Loader2, Check } from 'lucide-react';
+import { Loader2, Check } from 'lucide-react';
 import Header from '@/components/Header';
 import { videographerService } from '@/services/videographerService';
 import type { ViralAnalysis } from '@/types';
@@ -77,6 +77,18 @@ export default function MyProjectsPage() {
     if (p.includes('youtube')) return { emoji: '▶️', label: 'YouTube Long' };
     if (p.includes('tiktok')) return { emoji: '🎵', label: 'TikTok' };
     return { emoji: '📸', label: 'Instagram' };
+  };
+
+  // Get stage info for completed projects
+  const getStageInfo = (stage?: string) => {
+    switch (stage) {
+      case 'READY_FOR_EDIT': return { label: 'Ready for Edit', color: 'bg-purple-100 text-purple-700' };
+      case 'EDITING': return { label: 'Editing', color: 'bg-pink-100 text-pink-700' };
+      case 'EDIT_REVIEW': return { label: 'Edit Review', color: 'bg-amber-100 text-amber-700' };
+      case 'READY_TO_POST': return { label: 'Ready to Post', color: 'bg-green-100 text-green-700' };
+      case 'POSTED': return { label: 'Posted', color: 'bg-emerald-100 text-emerald-700' };
+      default: return { label: stage || 'Unknown', color: 'bg-gray-100 text-gray-700' };
+    }
   };
 
   const handleMarkComplete = async (projectId: string, e: React.MouseEvent) => {
@@ -260,6 +272,7 @@ export default function MyProjectsPage() {
               const shootType = getShootTypeInfo(project.shoot_type);
               const platform = getPlatformInfo(project.platform);
               const fileCount = getFileCount(project);
+              const stageInfo = getStageInfo(project.production_stage);
 
               return (
                 <Link
@@ -292,9 +305,9 @@ export default function MyProjectsPage() {
                           </span>
                         </div>
                       </div>
-                      <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      </div>
+                      <span className={`px-2 py-1 text-[11px] font-semibold rounded-full uppercase shrink-0 ${stageInfo.color}`}>
+                        {stageInfo.label}
+                      </span>
                     </div>
                   </div>
                 </Link>
