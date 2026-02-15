@@ -11,6 +11,7 @@ import {
   Eye,
   Heart,
   MessageCircle,
+  Loader2,
 } from 'lucide-react';
 import { ProductionStageLabels, ProductionStageColors } from '@/types';
 
@@ -23,44 +24,54 @@ interface AnalyticsData {
   stageDistribution: { stage: string; count: number }[];
 }
 
-interface DashboardStats {
-  totalAnalyses: number;
-  totalUsers: number;
-  pendingAnalyses: number;
-  approvedAnalyses: number;
-  rejectedAnalyses: number;
+interface PerformanceMetrics {
+  totalViews: number;
+  totalLikes: number;
+  totalComments: number;
+  videosPosted: number;
+  platformBreakdown: { platform: string; count: number; views: number }[];
+  topVideos: { id: string; title: string; content_id: string; platform: string; posted_at: string; post_views: number; post_likes: number; post_comments: number; profile_name: string }[];
+  postsPerDay: { date: string; count: number }[];
 }
 
-// Mock data for features not yet implemented in API
-const MOCK_WEEKLY_DATA = [
-  { day: 'Mon', count: 8 },
-  { day: 'Tue', count: 12 },
-  { day: 'Wed', count: 6 },
-  { day: 'Thu', count: 15 },
-  { day: 'Fri', count: 10 },
-  { day: 'Sat', count: 4 },
-  { day: 'Sun', count: 3 },
-];
+const formatNumber = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+};
 
-const MOCK_PLATFORM_DATA = [
-  { name: 'Instagram Reels', icon: '📸', videos: 52, views: '680K', percentage: 58, color: '#ec4899' },
-  { name: 'YouTube Shorts', icon: '🎬', videos: 28, views: '420K', percentage: 35, color: '#ef4444' },
-  { name: 'YouTube Long', icon: '▶️', videos: 9, views: '100K', percentage: 10, color: '#dc2626' },
-];
+const getPlatformLabel = (platform: string): string => {
+  switch (platform?.toLowerCase()) {
+    case 'instagram_reel': return 'Instagram Reels';
+    case 'youtube_shorts': return 'YouTube Shorts';
+    case 'youtube_long': return 'YouTube Long';
+    default: return platform || 'Other';
+  }
+};
 
-const MOCK_TOP_VIDEOS = [
-  { title: 'Dance Challenge', postedAgo: '5d ago', creator: 'Rahul Sharma', platform: 'Instagram', views: '125K', likes: '8.2K', comments: '342' },
-  { title: 'Cooking Hack', postedAgo: '1w ago', creator: 'Priya Patel', platform: 'YouTube Shorts', views: '98K', likes: '5.1K', comments: '189' },
-];
+const getPlatformIcon = (platform: string): string => {
+  switch (platform?.toLowerCase()) {
+    case 'instagram_reel': return '📸';
+    case 'youtube_shorts': return '🎬';
+    case 'youtube_long': return '▶️';
+    default: return '📹';
+  }
+};
 
-type TimePeriod = 'today' | 'week' | 'month' | 'all';
+const getPlatformColor = (platform: string): string => {
+  switch (platform?.toLowerCase()) {
+    case 'instagram_reel': return '#ec4899';
+    case 'youtube_shorts': return '#ef4444';
+    case 'youtube_long': return '#dc2626';
+    default: return '#6b7280';
+  }
+};
 
 export default function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('week');
 
   useEffect(() => {
     loadData();
@@ -68,19 +79,16 @@ export default function AnalyticsPage() {
 
   const loadData = async (isRefresh = false) => {
     try {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
 
-      const [analyticsData, dashboardStats] = await Promise.all([
+      const [analyticsData, performanceMetrics] = await Promise.all([
         adminService.getAnalyticsData(),
-        adminService.getDashboardStats(),
+        adminService.getPerformanceMetrics(),
       ]);
 
       setAnalytics(analyticsData);
-      setStats(dashboardStats);
+      setMetrics(performanceMetrics);
     } catch (error) {
       console.error('Failed to load analytics:', error);
     } finally {
@@ -97,23 +105,20 @@ export default function AnalyticsPage() {
     );
   };
 
-  const getMaxBarHeight = () => {
-    return Math.max(...MOCK_WEEKLY_DATA.map(d => d.count));
-  };
-
   if (loading) {
     return (
       <>
         <Header title="Analytics" subtitle="Performance metrics" showBack />
         <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+          <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
         </div>
       </>
     );
   }
 
   const weeklyChange = getWeeklyChange();
-  const maxBarHeight = getMaxBarHeight();
+  const maxBarCount = Math.max(...(metrics?.postsPerDay?.map(d => d.count) || [1]));
+  const totalPlatformCount = metrics?.platformBreakdown?.reduce((s, p) => s + p.count, 0) || 1;
 
   return (
     <>
@@ -133,46 +138,25 @@ export default function AnalyticsPage() {
       />
 
       <div className="px-4 py-4 pb-24 space-y-4">
-        {/* Time Period Filter */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex gap-2"
-        >
-          {[
-            { id: 'today', label: 'Today' },
-            { id: 'week', label: 'This Week' },
-            { id: 'month', label: 'This Month' },
-            { id: 'all', label: 'All Time' },
-          ].map((period) => (
-            <button
-              key={period.id}
-              onClick={() => setTimePeriod(period.id as TimePeriod)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                timePeriod === period.id
-                  ? 'bg-purple-500 text-white'
-                  : 'bg-gray-100 text-gray-600'
-              }`}
-            >
-              {period.label}
-            </button>
-          ))}
-        </motion.div>
-
         {/* Main Stat - Total Views */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
           className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-5 text-white"
         >
           <p className="text-purple-100 text-sm mb-1">Total Views</p>
           <div className="flex items-end gap-3">
-            <p className="text-4xl font-bold">1.2M</p>
-            <span className="flex items-center gap-1 px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium mb-1">
-              <TrendingUp className="w-3 h-3" />
-              23%
-            </span>
+            <p className="text-4xl font-bold">{formatNumber(metrics?.totalViews || 0)}</p>
+          </div>
+          <div className="flex gap-4 mt-3">
+            <div className="flex items-center gap-1.5">
+              <Heart className="w-4 h-4 text-purple-200" />
+              <span className="text-sm text-purple-100">{formatNumber(metrics?.totalLikes || 0)} likes</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <MessageCircle className="w-4 h-4 text-purple-200" />
+              <span className="text-sm text-purple-100">{formatNumber(metrics?.totalComments || 0)} comments</span>
+            </div>
           </div>
         </motion.div>
 
@@ -180,14 +164,14 @@ export default function AnalyticsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          transition={{ delay: 0.05 }}
           className="grid grid-cols-2 gap-3"
         >
           {/* Scripts This Week */}
           <div className="bg-white rounded-xl p-4 border border-gray-100">
             <div className="flex items-center gap-2 text-gray-500 mb-2">
               <FileText className="w-4 h-4" />
-              <span className="text-xs font-medium">Scripts Submitted</span>
+              <span className="text-xs font-medium">Scripts This Week</span>
             </div>
             <div className="flex items-end gap-2">
               <span className="text-2xl font-bold text-gray-900">
@@ -216,10 +200,6 @@ export default function AnalyticsPage() {
               <span className="text-2xl font-bold text-green-600">
                 {analytics?.approvalRate || 0}%
               </span>
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                <TrendingUp className="w-3 h-3" />
-                5%
-              </span>
             </div>
           </div>
 
@@ -229,13 +209,7 @@ export default function AnalyticsPage() {
               <Eye className="w-4 h-4" />
               <span className="text-xs font-medium">Videos Posted</span>
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-2xl font-bold text-gray-900">89</span>
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                <TrendingUp className="w-3 h-3" />
-                18%
-              </span>
-            </div>
+            <span className="text-2xl font-bold text-gray-900">{metrics?.videosPosted || 0}</span>
           </div>
 
           {/* Avg Engagement */}
@@ -244,13 +218,11 @@ export default function AnalyticsPage() {
               <Heart className="w-4 h-4" />
               <span className="text-xs font-medium">Avg. Engagement</span>
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-2xl font-bold text-gray-900">4.2%</span>
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                <TrendingDown className="w-3 h-3" />
-                0.3%
-              </span>
-            </div>
+            <span className="text-2xl font-bold text-gray-900">
+              {metrics && metrics.totalViews > 0
+                ? `${(((metrics.totalLikes + metrics.totalComments) / metrics.totalViews) * 100).toFixed(1)}%`
+                : '0%'}
+            </span>
           </div>
         </motion.div>
 
@@ -258,72 +230,123 @@ export default function AnalyticsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
+          transition={{ delay: 0.1 }}
           className="bg-white rounded-xl p-4 border border-gray-100"
         >
           <h3 className="font-semibold text-gray-900 mb-4">Posts This Week</h3>
           <div className="flex items-end justify-between gap-2 h-32">
-            {MOCK_WEEKLY_DATA.map((day, index) => {
-              const heightPercent = (day.count / maxBarHeight) * 100;
+            {(metrics?.postsPerDay || []).map((day, index) => {
+              const heightPercent = maxBarCount > 0 ? (day.count / maxBarCount) * 100 : 0;
               return (
-                <motion.div
-                  key={day.day}
-                  initial={{ height: 0 }}
-                  animate={{ height: 'auto' }}
-                  transition={{ delay: 0.2 + index * 0.05 }}
-                  className="flex-1 flex flex-col items-center gap-1"
-                >
+                <div key={index} className="flex-1 flex flex-col items-center gap-1">
                   <span className="text-xs font-semibold text-gray-700">{day.count}</span>
                   <div
                     className="w-full bg-gradient-to-t from-purple-600 to-purple-400 rounded-t-md transition-all"
-                    style={{ height: `${heightPercent}%`, minHeight: '8px' }}
+                    style={{ height: `${heightPercent}%`, minHeight: day.count > 0 ? '8px' : '2px' }}
                   />
-                  <span className="text-[10px] text-gray-500">{day.day}</span>
-                </motion.div>
+                  <span className="text-[10px] text-gray-500">{day.date}</span>
+                </div>
               );
             })}
           </div>
         </motion.div>
 
         {/* Platform Breakdown */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white rounded-xl p-4 border border-gray-100"
-        >
-          <h3 className="font-semibold text-gray-900 mb-4">By Platform</h3>
-          <div className="space-y-4">
-            {MOCK_PLATFORM_DATA.map((platform, index) => (
-              <motion.div
-                key={platform.name}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.25 + index * 0.05 }}
-                className="flex items-center gap-3"
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-                  style={{ background: `${platform.color}15` }}
-                >
-                  {platform.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 text-sm">{platform.name}</p>
-                  <p className="text-xs text-gray-500">{platform.videos} videos • {platform.views} views</p>
-                </div>
-                <div className="w-16">
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${platform.percentage}%`, background: platform.color }}
-                    />
+        {metrics?.platformBreakdown && metrics.platformBreakdown.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="bg-white rounded-xl p-4 border border-gray-100"
+          >
+            <h3 className="font-semibold text-gray-900 mb-4">By Platform</h3>
+            <div className="space-y-4">
+              {metrics.platformBreakdown
+                .sort((a, b) => b.count - a.count)
+                .map((platform) => {
+                  const percentage = Math.round((platform.count / totalPlatformCount) * 100);
+                  const color = getPlatformColor(platform.platform);
+                  return (
+                    <div key={platform.platform} className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                        style={{ background: `${color}15` }}
+                      >
+                        {getPlatformIcon(platform.platform)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 text-sm">{getPlatformLabel(platform.platform)}</p>
+                        <p className="text-xs text-gray-500">{platform.count} videos &bull; {formatNumber(platform.views)} views</p>
+                      </div>
+                      <div className="w-16">
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${percentage}%`, background: color }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Top Performing Videos */}
+        {metrics?.topVideos && metrics.topVideos.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white rounded-xl border border-gray-100 overflow-hidden"
+          >
+            <div className="p-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900">Top Performing Videos</h3>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {metrics.topVideos.map((video) => (
+                <div key={video.id} className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h4 className="font-semibold text-gray-900 text-sm">{video.title}</h4>
+                      <p className="text-xs text-gray-500">
+                        {video.content_id} &bull; {video.profile_name} &bull;{' '}
+                        {video.posted_at ? new Date(video.posted_at).toLocaleDateString() : ''}
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                      {getPlatformIcon(video.platform)} {getPlatformLabel(video.platform)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-gray-50 rounded-lg py-2 px-3">
+                      <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
+                        <Eye className="w-3 h-3" />
+                        <span className="text-[10px]">Views</span>
+                      </div>
+                      <p className="font-bold text-gray-900 text-sm">{formatNumber(video.post_views)}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg py-2 px-3">
+                      <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
+                        <Heart className="w-3 h-3" />
+                        <span className="text-[10px]">Likes</span>
+                      </div>
+                      <p className="font-bold text-gray-900 text-sm">{formatNumber(video.post_likes)}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg py-2 px-3">
+                      <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
+                        <MessageCircle className="w-3 h-3" />
+                        <span className="text-[10px]">Comments</span>
+                      </div>
+                      <p className="font-bold text-gray-900 text-sm">{formatNumber(video.post_comments)}</p>
+                    </div>
                   </div>
                 </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Top Script Writers */}
         <motion.div
@@ -333,18 +356,13 @@ export default function AnalyticsPage() {
           className="bg-white rounded-xl p-4 border border-gray-100"
         >
           <h3 className="font-semibold text-gray-900 mb-4">Top Script Writers</h3>
-
           {analytics?.topWriters && analytics.topWriters.length > 0 ? (
             <div className="space-y-1">
               {analytics.topWriters.slice(0, 5).map((writer, index) => (
-                <motion.div
+                <div
                   key={writer.name}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + index * 0.05 }}
                   className="flex items-center gap-3 py-3 border-b border-gray-50 last:border-0"
                 >
-                  {/* Rank Badge */}
                   <div
                     className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm ${
                       index === 0
@@ -358,25 +376,14 @@ export default function AnalyticsPage() {
                   >
                     {index + 1}
                   </div>
-
-                  {/* Avatar */}
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-semibold text-sm">
                     {writer.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                   </div>
-
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 text-sm truncate">{writer.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {writer.count} approved • {writer.rate || 85}% rate
-                    </p>
+                    <p className="text-xs text-gray-500">{writer.count} scripts</p>
                   </div>
-
-                  {/* Score */}
-                  <div className="text-base font-bold text-gray-800">
-                    ⭐ {(9.5 - index * 0.5).toFixed(1)}
-                  </div>
-                </motion.div>
+                </div>
               ))}
             </div>
           ) : (
@@ -384,83 +391,19 @@ export default function AnalyticsPage() {
           )}
         </motion.div>
 
-        {/* Top Performing Videos */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-xl border border-gray-100 overflow-hidden"
-        >
-          <div className="p-4 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-              🔥 Top Performing Videos
-            </h3>
-          </div>
-
-          <div className="divide-y divide-gray-100">
-            {MOCK_TOP_VIDEOS.map((video, index) => (
-              <motion.div
-                key={video.title}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.35 + index * 0.05 }}
-                className="p-4"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">{video.title}</h4>
-                    <p className="text-xs text-gray-500">Posted {video.postedAgo} • by {video.creator}</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                    {video.platform === 'Instagram' ? '📸' : '🎬'} {video.platform}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  <div className="bg-gray-50 rounded-lg py-2 px-3">
-                    <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
-                      <Eye className="w-3 h-3" />
-                      <span className="text-[10px]">Views</span>
-                    </div>
-                    <p className="font-bold text-gray-900 text-sm">{video.views}</p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg py-2 px-3">
-                    <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
-                      <Heart className="w-3 h-3" />
-                      <span className="text-[10px]">Likes</span>
-                    </div>
-                    <p className="font-bold text-gray-900 text-sm">{video.likes}</p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg py-2 px-3">
-                    <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
-                      <MessageCircle className="w-3 h-3" />
-                      <span className="text-[10px]">Comments</span>
-                    </div>
-                    <p className="font-bold text-gray-900 text-sm">{video.comments}</p>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-
         {/* Pipeline Distribution */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
+          transition={{ delay: 0.3 }}
           className="bg-white rounded-xl p-4 border border-gray-100"
         >
           <h3 className="font-semibold text-gray-900 mb-4">Pipeline Distribution</h3>
-
           {analytics?.stageDistribution && analytics.stageDistribution.length > 0 ? (
             <div className="space-y-3">
               {analytics.stageDistribution
                 .sort((a, b) => {
-                  const order = ['PLANNING', 'SHOOTING', 'READY_FOR_EDIT', 'EDITING', 'READY_TO_POST', 'POSTED'];
+                  const order = ['PLANNING', 'SHOOTING', 'READY_FOR_EDIT', 'EDITING', 'EDIT_REVIEW', 'READY_TO_POST', 'POSTED'];
                   return order.indexOf(a.stage) - order.indexOf(b.stage);
                 })
                 .map((item) => {
@@ -492,30 +435,14 @@ export default function AnalyticsPage() {
           )}
         </motion.div>
 
-        {/* Summary Stats */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="bg-white rounded-xl p-4 border border-gray-100"
-        >
-          <h3 className="font-semibold text-gray-900 mb-4">Overall Summary</h3>
-
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-gray-900">{stats?.totalAnalyses || 0}</div>
-              <div className="text-xs text-gray-500">Total Scripts</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-amber-600">{stats?.pendingAnalyses || 0}</div>
-              <div className="text-xs text-gray-500">Pending</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-red-600">{stats?.rejectedAnalyses || 0}</div>
-              <div className="text-xs text-gray-500">Rejected</div>
-            </div>
+        {/* No metrics hint */}
+        {metrics && metrics.totalViews === 0 && metrics.videosPosted > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+            <p className="text-sm text-amber-800">
+              No view/like data yet. Posting managers can update metrics from the Posted tab.
+            </p>
           </div>
-        </motion.div>
+        )}
       </div>
     </>
   );

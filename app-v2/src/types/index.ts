@@ -311,6 +311,9 @@ export interface ViralAnalysis {
 
   // Analytics/Views
   total_views?: number;
+  post_views?: number;
+  post_likes?: number;
+  post_comments?: number;
 
   // Assignments
   assignments?: ProjectAssignment[];

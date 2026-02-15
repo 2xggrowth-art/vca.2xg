@@ -41,14 +41,14 @@ export default function PostedPage() {
     }
   };
 
-  // Calculate stats (placeholder - would need real analytics data)
   const getStats = (): PostedStats => {
-    // These would come from real analytics data in production
-    // For now, showing the count and placeholders
+    const totalViews = postedProjects.reduce((sum, p) => sum + (p.post_views || 0), 0);
+    const totalLikes = postedProjects.reduce((sum, p) => sum + (p.post_likes || 0), 0);
+    const totalComments = postedProjects.reduce((sum, p) => sum + (p.post_comments || 0), 0);
     return {
-      totalViews: 0, // Would aggregate from analytics
+      totalViews,
       totalPosts: postedProjects.length,
-      avgEngagement: 0, // Would calculate from analytics
+      avgEngagement: totalViews > 0 ? ((totalLikes + totalComments) / totalViews) * 100 : 0,
     };
   };
 
@@ -293,19 +293,23 @@ export default function PostedPage() {
                 {/* Stats Row */}
                 <div className="flex bg-gray-50 border-t border-gray-100">
                   <div className="flex-1 py-3 text-center">
-                    <div className="text-sm font-bold text-gray-800">--</div>
+                    <div className="text-sm font-bold text-gray-800">{formatNumber(project.post_views)}</div>
                     <div className="text-[10px] text-gray-500 uppercase">Views</div>
                   </div>
                   <div className="flex-1 py-3 text-center border-l border-gray-100">
-                    <div className="text-sm font-bold text-gray-800">--</div>
+                    <div className="text-sm font-bold text-gray-800">{formatNumber(project.post_likes)}</div>
                     <div className="text-[10px] text-gray-500 uppercase">Likes</div>
                   </div>
                   <div className="flex-1 py-3 text-center border-l border-gray-100">
-                    <div className="text-sm font-bold text-gray-800">--</div>
+                    <div className="text-sm font-bold text-gray-800">{formatNumber(project.post_comments)}</div>
                     <div className="text-[10px] text-gray-500 uppercase">Comments</div>
                   </div>
                   <div className="flex-1 py-3 text-center border-l border-gray-100">
-                    <div className="text-sm font-bold text-gray-800">--</div>
+                    <div className="text-sm font-bold text-gray-800">
+                      {(project.post_views || 0) > 0
+                        ? `${((((project.post_likes || 0) + (project.post_comments || 0)) / project.post_views!) * 100).toFixed(1)}%`
+                        : '--'}
+                    </div>
                     <div className="text-[10px] text-gray-500 uppercase">Engage</div>
                   </div>
                 </div>

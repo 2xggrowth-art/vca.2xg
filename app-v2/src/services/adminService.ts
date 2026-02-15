@@ -508,6 +508,85 @@ export const adminService = {
   },
 
   /**
+   * Get real performance metrics for analytics page
+   */
+  async getPerformanceMetrics(): Promise<{
+    totalViews: number;
+    totalLikes: number;
+    totalComments: number;
+    videosPosted: number;
+    platformBreakdown: { platform: string; count: number; views: number }[];
+    topVideos: { id: string; title: string; content_id: string; platform: string; posted_at: string; post_views: number; post_likes: number; post_comments: number; profile_name: string }[];
+    postsPerDay: { date: string; count: number }[];
+  }> {
+    // Fetch all posted projects with metrics
+    const { data, error } = await supabase
+      .from('viral_analyses')
+      .select('id, title, content_id, platform, posted_at, posted_url, post_views, post_likes, post_comments, profile:profile_list(name)')
+      .eq('status', 'APPROVED')
+      .eq('production_stage', 'POSTED')
+      .order('posted_at', { ascending: false });
+
+    if (error) throw error;
+    const posts = (data || []) as any[];
+
+    const totalViews = posts.reduce((sum, p) => sum + (p.post_views || 0), 0);
+    const totalLikes = posts.reduce((sum, p) => sum + (p.post_likes || 0), 0);
+    const totalComments = posts.reduce((sum, p) => sum + (p.post_comments || 0), 0);
+
+    // Platform breakdown
+    const platformMap: Record<string, { count: number; views: number }> = {};
+    for (const p of posts) {
+      const plat = p.platform || 'unknown';
+      if (!platformMap[plat]) platformMap[plat] = { count: 0, views: 0 };
+      platformMap[plat].count++;
+      platformMap[plat].views += p.post_views || 0;
+    }
+    const platformBreakdown = Object.entries(platformMap).map(([platform, data]) => ({
+      platform, count: data.count, views: data.views,
+    }));
+
+    // Top videos by views
+    const topVideos = posts
+      .filter(p => (p.post_views || 0) > 0)
+      .sort((a, b) => (b.post_views || 0) - (a.post_views || 0))
+      .slice(0, 5)
+      .map(p => ({
+        id: p.id,
+        title: p.title || 'Untitled',
+        content_id: p.content_id || '',
+        platform: p.platform || 'unknown',
+        posted_at: p.posted_at || '',
+        post_views: p.post_views || 0,
+        post_likes: p.post_likes || 0,
+        post_comments: p.post_comments || 0,
+        profile_name: p.profile?.name || '',
+      }));
+
+    // Posts per day (last 7 days)
+    const postsPerDay: { date: string; count: number }[] = [];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayLabel = days[d.getDay()];
+      const count = posts.filter(p => p.posted_at && p.posted_at.startsWith(dateStr)).length;
+      postsPerDay.push({ date: dayLabel, count });
+    }
+
+    return {
+      totalViews,
+      totalLikes,
+      totalComments,
+      videosPosted: posts.length,
+      platformBreakdown,
+      topVideos,
+      postsPerDay,
+    };
+  },
+
+  /**
    * Get analyses by production stage
    */
   async getAnalysesByStage(stage: string): Promise<ViralAnalysis[]> {

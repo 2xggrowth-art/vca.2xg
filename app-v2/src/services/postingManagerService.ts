@@ -418,6 +418,23 @@ export const postingManagerService = {
   },
 
   /**
+   * Update post performance metrics (views, likes, comments)
+   */
+  async updateMetrics(analysisId: string, metrics: { views?: number; likes?: number; comments?: number }): Promise<void> {
+    const updateData: Record<string, unknown> = {};
+    if (metrics.views !== undefined) updateData.post_views = metrics.views;
+    if (metrics.likes !== undefined) updateData.post_likes = metrics.likes;
+    if (metrics.comments !== undefined) updateData.post_comments = metrics.comments;
+
+    const { error } = await supabase
+      .from('viral_analyses')
+      .update(updateData)
+      .eq('id', analysisId);
+
+    if (error) throw error;
+  },
+
+  /**
    * Get edited video files for a project (for preview before posting)
    */
   async getEditedVideoFiles(analysisId: string): Promise<any[]> {

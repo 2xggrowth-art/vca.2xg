@@ -61,6 +61,10 @@ export default function PostDetailPage() {
   const [keepInQueue, setKeepInQueue] = useState(false);
   const [showPostModal, setShowPostModal] = useState(false);
   const [showPostingSection, setShowPostingSection] = useState(!isPreviewMode);
+  const [metricViews, setMetricViews] = useState('');
+  const [metricLikes, setMetricLikes] = useState('');
+  const [metricComments, setMetricComments] = useState('');
+  const [savingMetrics, setSavingMetrics] = useState(false);
 
   const hashtagInputRef = useRef<HTMLInputElement>(null);
 
@@ -80,6 +84,9 @@ export default function PostDetailPage() {
       if (data.posting_caption) setCaption(data.posting_caption);
       if (data.posting_hashtags) setHashtags(data.posting_hashtags);
       if (data.scheduled_post_time) setScheduledTime(data.scheduled_post_time.slice(0, 16));
+      if (data.post_views) setMetricViews(String(data.post_views));
+      if (data.post_likes) setMetricLikes(String(data.post_likes));
+      if (data.post_comments) setMetricComments(String(data.post_comments));
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
@@ -172,6 +179,22 @@ export default function PostDetailPage() {
       toast.error(error.message || 'Failed to mark as posted');
     } finally {
       setPosting(false);
+    }
+  };
+
+  const handleSaveMetrics = async () => {
+    try {
+      setSavingMetrics(true);
+      await postingManagerService.updateMetrics(id!, {
+        views: parseInt(metricViews) || 0,
+        likes: parseInt(metricLikes) || 0,
+        comments: parseInt(metricComments) || 0,
+      });
+      toast.success('Metrics updated!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save metrics');
+    } finally {
+      setSavingMetrics(false);
     }
   };
 
@@ -629,6 +652,64 @@ export default function PostDetailPage() {
               })}
             </p>
           )}
+        </motion.div>
+      )}
+
+      {/* Performance Metrics (for POSTED stage) */}
+      {isPosted && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="bg-white rounded-xl border border-gray-100 p-4 mb-4"
+        >
+          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-2">
+            <span>📊</span> Performance Metrics
+          </h3>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 uppercase mb-1">Views</label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={metricViews}
+                onChange={(e) => setMetricViews(e.target.value)}
+                placeholder="0"
+                className="w-full p-2.5 border-2 border-gray-200 rounded-xl text-center text-sm font-semibold focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 uppercase mb-1">Likes</label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={metricLikes}
+                onChange={(e) => setMetricLikes(e.target.value)}
+                placeholder="0"
+                className="w-full p-2.5 border-2 border-gray-200 rounded-xl text-center text-sm font-semibold focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 uppercase mb-1">Comments</label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={metricComments}
+                onChange={(e) => setMetricComments(e.target.value)}
+                placeholder="0"
+                className="w-full p-2.5 border-2 border-gray-200 rounded-xl text-center text-sm font-semibold focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+          </div>
+          <Button
+            fullWidth
+            variant="outline"
+            onClick={handleSaveMetrics}
+            disabled={savingMetrics}
+          >
+            {savingMetrics ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {savingMetrics ? 'Saving...' : 'Update Metrics'}
+          </Button>
         </motion.div>
       )}
 
