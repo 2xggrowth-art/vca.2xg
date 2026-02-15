@@ -214,7 +214,7 @@ class GoogleDriveOAuthService {
           resolve();
         };
 
-        this.tokenClient.requestAccessToken({ prompt: '' });
+        this.tokenClient.requestAccessToken({ prompt: 'consent' });
       } catch (error: any) {
         console.error('Sign in error:', error);
         reject(error);
