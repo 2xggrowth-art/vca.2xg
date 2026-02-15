@@ -207,26 +207,26 @@ export const videographerService = {
 
     const myIds = ((assignments || []) as { analysis_id: string }[]).map((a) => a.analysis_id);
 
-    // Run all count queries in parallel (no full data fetches)
+    // Run all queries in parallel
     const planningStages = ['PLANNING', 'NOT_STARTED', 'PRE_PRODUCTION', 'PLANNED'];
     const completedStages = ['READY_FOR_EDIT', 'EDITING', 'EDIT_REVIEW', 'READY_TO_POST', 'POSTED'];
 
     const [
-      availableResult,
-      availableNullResult,
+      planningResult,
+      nullStageResult,
       assignedVidsResult,
       activeResult,
       completedResult,
       scriptsResult,
     ] = await Promise.all([
-      // Count available projects (approved + planning stage)
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+      // Planning stage project IDs
+      supabase.from('viral_analyses').select('id')
         .eq('status', 'APPROVED').in('production_stage', planningStages),
-      // Count available projects with null stage
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+      // Null stage project IDs
+      supabase.from('viral_analyses').select('id')
         .eq('status', 'APPROVED').is('production_stage', null),
-      // Count projects that already have a videographer (to subtract)
-      supabase.from('project_assignments').select('id', { count: 'exact', head: true })
+      // All videographer assignment analysis_ids
+      supabase.from('project_assignments').select('analysis_id')
         .eq('role', 'VIDEOGRAPHER'),
       // Active shoots (my projects in SHOOTING)
       myIds.length > 0
@@ -243,17 +243,22 @@ export const videographerService = {
         .eq('user_id', user.id),
     ]);
 
-    // Available ≈ (planning + null_stage) - already_assigned (rough count, good enough for stats)
-    const roughAvailable = Math.max(0,
-      (availableResult.count || 0) + (availableNullResult.count || 0) - (assignedVidsResult.count || 0)
+    // Available = planning/null-stage projects that don't have a videographer assigned
+    const vidProjectIds = new Set(
+      ((assignedVidsResult.data || []) as { analysis_id: string }[]).map(a => a.analysis_id)
     );
+    const allPlanningIds = [
+      ...((planningResult.data || []) as { id: string }[]),
+      ...((nullStageResult.data || []) as { id: string }[]),
+    ];
+    const availableCount = allPlanningIds.filter(p => !vidProjectIds.has(p.id)).length;
 
     return {
       activeShoots: activeResult.count || 0,
       totalShoots: myIds.length,
       scripts: scriptsResult.count || 0,
       completed: completedResult.count || 0,
-      available: roughAvailable,
+      available: availableCount,
     };
   },
 
@@ -288,7 +293,6 @@ export const videographerService = {
     const [
       myProjectsResult, myFilesResult, myScriptsResult,
       availableResult, availableNullResult, skipsResult,
-      availableCountResult, availableNullCountResult, scriptsCountResult,
     ] = await Promise.all([
       // My projects (full data)
       myIds.length > 0
@@ -322,14 +326,6 @@ export const videographerService = {
       // Skipped projects
       supabase.from('project_skips').select('analysis_id')
         .eq('user_id', user.id).eq('role', 'VIDEOGRAPHER'),
-      // Stats: available counts (HEAD only)
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
-        .eq('status', 'APPROVED').in('production_stage', planningStages),
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
-        .eq('status', 'APPROVED').is('production_stage', null),
-      // Scripts count
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id),
     ]);
 
     // Build my projects with files
@@ -368,17 +364,14 @@ export const videographerService = {
     // Calculate stats from fetched data
     const activeShoots = projects.filter(p => p.production_stage === 'SHOOTING').length;
     const completed = projects.filter(p => completedStages.includes(p.production_stage || '')).length;
-    const roughAvailable = Math.max(0,
-      (availableCountResult.count || 0) + (availableNullCountResult.count || 0) - allAssignedIds.size
-    );
 
     return {
       stats: {
         activeShoots,
         totalShoots: myIds.length,
-        scripts: scriptsCountResult.count || 0,
+        scripts: ((myScriptsResult.data || []) as any[]).length,
         completed,
-        available: roughAvailable,
+        available: available.length,
       },
       projects,
       scripts: ((myScriptsResult.data || []) as ViralAnalysis[]),

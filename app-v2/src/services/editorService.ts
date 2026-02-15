@@ -198,13 +198,13 @@ export const editorService = {
     const assignmentsList = (assignments || []) as { analysis_id: string }[];
     const myIds = assignmentsList.map((a) => a.analysis_id);
 
-    // Run all count queries in parallel (no full data fetches)
-    const [availableCountResult, assignedEditorsResult, inProgressResult, completedResult] = await Promise.all([
-      // Count READY_FOR_EDIT projects (rough available count)
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+    // Run all queries in parallel
+    const [readyForEditResult, editorAssignmentsResult, inProgressResult, completedResult] = await Promise.all([
+      // READY_FOR_EDIT project IDs
+      supabase.from('viral_analyses').select('id')
         .eq('status', 'APPROVED').eq('production_stage', 'READY_FOR_EDIT'),
-      // Count projects that already have an editor (to subtract)
-      supabase.from('project_assignments').select('id', { count: 'exact', head: true })
+      // All editor assignment analysis_ids
+      supabase.from('project_assignments').select('analysis_id')
         .eq('role', 'EDITOR'),
       // My in-progress edits
       myIds.length > 0
@@ -216,14 +216,16 @@ export const editorService = {
         : Promise.resolve({ count: 0 }),
     ]);
 
-    // Available ≈ READY_FOR_EDIT count - assigned editors (rough, good enough for stats)
-    const roughAvailable = Math.max(0,
-      (availableCountResult.count || 0) - (assignedEditorsResult.count || 0)
+    // Available = READY_FOR_EDIT projects that don't have an editor assigned
+    const editorProjectIds = new Set(
+      ((editorAssignmentsResult.data || []) as { analysis_id: string }[]).map(a => a.analysis_id)
     );
+    const availableCount = ((readyForEditResult.data || []) as { id: string }[])
+      .filter(p => !editorProjectIds.has(p.id)).length;
 
     return {
       inProgress: inProgressResult.count || 0,
-      available: roughAvailable,
+      available: availableCount,
       completed: completedResult.count || 0,
     };
   },
@@ -249,16 +251,16 @@ export const editorService = {
 
     // 2. Run stats counts + project data in parallel
     const [
-      availableCountResult,
-      assignedEditorsResult,
+      readyForEditResult,
+      editorAssignmentsResult,
       projectsResult,
       filesResult,
     ] = await Promise.all([
-      // Stats: count READY_FOR_EDIT
-      supabase.from('viral_analyses').select('id', { count: 'exact', head: true })
+      // Stats: get READY_FOR_EDIT project IDs (lightweight)
+      supabase.from('viral_analyses').select('id')
         .eq('status', 'APPROVED').eq('production_stage', 'READY_FOR_EDIT'),
-      // Stats: count assigned editors
-      supabase.from('project_assignments').select('id', { count: 'exact', head: true })
+      // Stats: get all editor assignment analysis_ids (to check which READY_FOR_EDIT already have editors)
+      supabase.from('project_assignments').select('analysis_id')
         .eq('role', 'EDITOR'),
       // Projects: full data
       myIds.length > 0
@@ -290,9 +292,13 @@ export const editorService = {
     const completed = projectList.filter((p: any) =>
       ['EDIT_REVIEW', 'READY_TO_POST', 'POSTED'].includes(p.production_stage || '')
     ).length;
-    const roughAvailable = Math.max(0,
-      (availableCountResult.count || 0) - (assignedEditorsResult.count || 0)
+
+    // Available = READY_FOR_EDIT projects that don't have an editor assigned
+    const editorProjectIds = new Set(
+      ((editorAssignmentsResult.data || []) as { analysis_id: string }[]).map(a => a.analysis_id)
     );
+    const availableCount = ((readyForEditResult.data || []) as { id: string }[])
+      .filter(p => !editorProjectIds.has(p.id)).length;
 
     // Attach files to projects
     const filesByAnalysis = new Map<string, any[]>();
@@ -314,7 +320,7 @@ export const editorService = {
     })) as ViralAnalysis[];
 
     return {
-      stats: { inProgress, available: roughAvailable, completed },
+      stats: { inProgress, available: availableCount, completed },
       projects,
     };
   },
