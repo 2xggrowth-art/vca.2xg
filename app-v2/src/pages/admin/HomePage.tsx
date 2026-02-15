@@ -129,9 +129,9 @@ export default function AdminHomePage() {
     );
   }
 
-  // Calculate in production (planning + shooting + editing + ready for edit + ready to post)
+  // Calculate in production (all active stages)
   const inProduction = (queueStats?.planning || 0) + (queueStats?.shooting || 0) +
-    (queueStats?.editing || 0) + (queueStats?.readyForEdit || 0) + (queueStats?.readyToPost || 0);
+    (queueStats?.readyForEdit || 0) + (queueStats?.editing || 0) + (queueStats?.editReview || 0) + (queueStats?.readyToPost || 0);
 
   // Quick action items with tinted backgrounds
   const quickActions = [
