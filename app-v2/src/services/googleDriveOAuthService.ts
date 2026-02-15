@@ -201,7 +201,7 @@ class GoogleDriveOAuthService {
 
     return new Promise((resolve, reject) => {
       try {
-        this.tokenClient.callback = (response: any) => {
+        this.tokenClient.callback = async (response: any) => {
           if (response.error) {
             reject(new Error(response.error));
             return;
@@ -211,10 +211,23 @@ class GoogleDriveOAuthService {
           this.tokenExpiresAt = Date.now() + expiresIn * 1000;
           gapi.client.setToken({ access_token: this.accessToken });
           console.log('Signed in to Google Drive');
+
+          // Verify Drive API access with a test call
+          try {
+            await gapi.client.drive.about.get({ fields: 'user' });
+            console.log('Google Drive API access verified');
+          } catch (verifyError: any) {
+            console.error('Drive API verification failed:', verifyError);
+            this.accessToken = null;
+            this.tokenExpiresAt = 0;
+            reject(new Error('Google Drive access denied. Please ensure you granted Drive permissions.'));
+            return;
+          }
+
           resolve();
         };
 
-        this.tokenClient.requestAccessToken({ prompt: 'consent' });
+        this.tokenClient.requestAccessToken({ prompt: '' });
       } catch (error: any) {
         console.error('Sign in error:', error);
         reject(error);
@@ -315,6 +328,12 @@ class GoogleDriveOAuthService {
       return null;
     } catch (error: any) {
       console.error('Find folder error:', error);
+      // Re-throw auth errors instead of silently returning null
+      if (error.status === 401 || error.status === 403 || error.result?.error?.code === 401 || error.result?.error?.code === 403) {
+        this.accessToken = null;
+        this.tokenExpiresAt = 0;
+        throw new Error(`Google Drive access error: ${error.result?.error?.message || 'Authentication failed. Please sign in again.'}`);
+      }
       return null;
     }
   }
